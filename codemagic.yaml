@@ -2,38 +2,22 @@ name: Build iOS IPA
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: macos-latest
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: npm
-
+workflows:
+  ios-workflow:
+    instance_type: mac_mini_m1
+    max_build_duration: 30
+    environment:
+      vars:
+        NODE_VERSION: 18
+    scripts:
       - name: Install dependencies
-        run: npm ci
-
-      - name: Build IPA
-        run: npx expo export --platform ios
-
-      - name: Package IPA
-        run: |
-          mkdir -p Payload
-          cp -r build/ios/Release-iphoneos/*.app Payload/
-          zip -r NemesisAI.ipa Payload
-          rm -rf Payload
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: NemesisAI
-          path: NemesisAI.ipa
+        script: |
+          npm install
+      - name: Build iOS
+        script: |
+          npx expo export --platform ios
+    artifacts:
+      - build/ios/**/*.app
