@@ -5,19 +5,43 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-workflows:
-  ios-workflow:
-    instance_type: mac_mini_m1
-    max_build_duration: 30
-    environment:
-      vars:
-        NODE_VERSION: 18
-    scripts:
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
       - name: Install dependencies
-        script: |
-          npm install
-      - name: Build iOS
-        script: |
-          npx expo export --platform ios
-    artifacts:
-      - build/ios/**/*.app
+        run: npm ci
+
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Build IPA
+        run: |
+          cd ios
+          xcodebuild -workspace YourApp.xcworkspace \
+            -scheme YourApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          xcodebuild -exportArchive \
+            -archivePath build/Release-iphoneos/YourApp.xcarchive \
+            -exportPath build/ios \
+            -exportOptionsPlist exportOptions.plist
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NemesisAI
+          path: build/ios/*.ipa
