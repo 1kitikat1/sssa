@@ -35,7 +35,6 @@ workflows:
         script: |
           cd ios
           pod install
-          # Archive
           xcodebuild archive \
             -workspace NemesisAI.xcworkspace \
             -scheme NemesisAI \
@@ -43,16 +42,13 @@ workflows:
             -sdk iphoneos \
             -arch arm64 \
             CODE_SIGNING_ALLOWED=NO \
-            ARCHS=arm64 \
-            ONLY_ACTIVE_ARCH=NO \
-            DEVELOPMENT_TEAM= \
-            CODE_SIGN_IDENTITY= \
-            PROVISIONING_PROFILE_SPECIFIER= \
             -derivedDataPath build
-          # Export
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/Archive/NemesisAI.xcarchive \
+          # Найди архив
+          ARCHIVE_PATH=$(find build -name "*.xcarchive" -type d | head -1)
+          echo "Found archive: $ARCHIVE_PATH"
+          # Экспортируй IPA
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
             -exportPath build/ios \
             -exportOptionsPlist exportOptions.plist
     artifacts:
