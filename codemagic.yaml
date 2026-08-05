@@ -43,11 +43,12 @@ workflows:
             -arch arm64 \
             CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath build
-          ARCHIVE_PATH=$(find build/Build/Intermediates.noindex/ArchiveIntermediates -name "*.xcarchive" -type d 2>/dev/null | head -1)
+          ARCHIVE_PATH=$(find build -type d -name "NemesisAI.xcarchive" 2>/dev/null | head -1)
           echo "Archive path: $ARCHIVE_PATH"
           if [ -z "$ARCHIVE_PATH" ]; then
             echo "ERROR: Archive not found!"
-            find build -name "*.xcarchive" 2>/dev/null
+            find build -type d -name "*.xcarchive" 2>/dev/null
+            find build -type d -name "ArchiveIntermediates" 2>/dev/null
             exit 1
           fi
           xcodebuild -exportArchive \
@@ -56,3 +57,4 @@ workflows:
             -exportOptionsPlist exportOptions.plist
     artifacts:
       - build/ios/**/*.ipa
+
