@@ -7,10 +7,7 @@ workflows:
     environment:
       ios_signing:
         distribution_type: development
-        bundle_id: com.Nemesis.AI
-        apple_id: grigorijv624@gmail.com
-        team_id: \"\"
-        app_store_connect_api_key: \"\"
+        bundle_id: 'com.Nemesis.AI'
       vars:
         APPLE_ID: 'grigorijv624@gmail.com'
       node: 18
@@ -20,7 +17,6 @@ workflows:
           npm install
       - name: Build iOS
         script: |
-          npx expo export:web
           npx eas-cli build --platform ios --profile preview --non-interactive
     artifacts:
       - /build/ios/ipa/*.ipa" > codemagic.yaml
