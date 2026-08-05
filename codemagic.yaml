@@ -6,8 +6,8 @@ workflows:
     environment:
       ios_signing:
         distribution_type: development
-        bundle_id: com.Nemesis.AI
       vars:
+        BUNDLE_ID: com.Nemesis.AI
         NODE_VERSION: 18
     scripts:
       - name: Install dependencies
