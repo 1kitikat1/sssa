@@ -2,13 +2,19 @@ name: Nemesis AI Build
 workflows:
   ios-workflow:
     instance_type: mac_mini_m1
+    max_build_duration: 30
     environment:
       ios_signing:
         distribution_type: development
         bundle_id: com.Nemesis.AI
-      node: 18
+      vars:
+        NODE_VERSION: 18
     scripts:
-      - npm install
-      - npx eas-cli build --platform ios --profile preview --non-interactive
+      - name: Install dependencies
+        script: |
+          npm install
+      - name: Build iOS
+        script: |
+          npx expo build:ios
     artifacts:
-      - build/**/*.ipa
+      - build/ios/ipa/*.ipa
