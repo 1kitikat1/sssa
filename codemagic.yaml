@@ -18,7 +18,7 @@ workflows:
           cd ios
           pod install
           xcodebuild \
-            -workspace YourApp.xcworkspace \
+            -workspace  NemesisAI.xcworkspace \
             -scheme NemesisAI \
             -configuration Release \
             -sdk iphoneos \
@@ -35,4 +35,4 @@ workflows:
     publishing:
       email:
         recipients:
-          - your@email.com
+          - grigorijv624@gmail.com
