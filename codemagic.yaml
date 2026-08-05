@@ -1,47 +1,12 @@
-name: Build iOS IPA
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
+name: Build with EAS
+on: push
 jobs:
   build:
-    runs-on: macos-latest
-    
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Prebuild iOS
-        run: npx expo prebuild --platform ios --clean
-
-      - name: Build IPA
-        run: |
-          cd ios
-          xcodebuild -workspace YourApp.xcworkspace \
-            -scheme YourApp \
-            -configuration Release \
-            -sdk iphoneos \
-            -arch arm64 \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-          xcodebuild -exportArchive \
-            -archivePath build/Release-iphoneos/YourApp.xcarchive \
-            -exportPath build/ios \
-            -exportOptionsPlist exportOptions.plist
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: NemesisAI
-          path: build/ios/*.ipa
+      - run: npm ci
+      - run: npx eas build --platform ios --profile development --non-interactive
