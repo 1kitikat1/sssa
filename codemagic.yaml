@@ -8,6 +8,9 @@ workflows:
       ios_signing:
         distribution_type: development
         bundle_id: com.Nemesis.AI
+        apple_id: grigorijv624@gmail.com
+        team_id: \"\"
+        app_store_connect_api_key: \"\"
       vars:
         APPLE_ID: 'grigorijv624@gmail.com'
       node: 18
