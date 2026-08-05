@@ -6,8 +6,6 @@ echo "workflows:
       ios_signing:
         distribution_type: development
         bundle_id: com.Nemesis.AI
-      vars:
-        APPLE_ID: grigorijv624@gmail.com
       node: 18
     scripts:
       - name: Install dependencies
