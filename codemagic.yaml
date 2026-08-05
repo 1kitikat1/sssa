@@ -25,11 +25,20 @@ workflows:
             -arch arm64 \
             CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath build
+          # Найди .app файл
+          APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
+          echo "Found app: $APP_PATH"
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: .app not found!"
+            find build -name "*.app" 2>/dev/null
+            exit 1
+          fi
           # Упакуй в IPA
           mkdir -p ../build/ios/Payload
-          cp -r build/Release-iphoneos/NemesisAI.app ../build/ios/Payload/
+          cp -r "$APP_PATH" ../build/ios/Payload/
           cd ../build/ios
-          zip -r NemesisAI.ipa Payload
+          zip -r NemesisAI.ipa Payload/
           rm -rf Payload
+          ls -la
     artifacts:
       - build/ios/*.ipa
