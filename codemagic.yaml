@@ -1,4 +1,4 @@
-echo "name: Nemesis AI Build
+name: Nemesis AI Build
 workflows:
   ios-workflow:
     instance_type: mac_mini_m1
@@ -11,4 +11,4 @@ workflows:
       - npm install
       - npx eas-cli build --platform ios --profile preview --non-interactive
     artifacts:
-      - build/**/*.ipa" > codemagic.yaml
+      - build/**/*.ipa
