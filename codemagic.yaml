@@ -13,12 +13,30 @@ workflows:
       - name: Prebuild iOS
         script: |
           npx expo prebuild --platform ios --clean
+      - name: Create exportOptions.plist
+        script: |
+          cat > ios/exportOptions.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>uploadBitcode</key>
+              <false/>
+              <key>uploadSymbols</key>
+              <false/>
+              <key>compileBitcode</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
       - name: Build iOS
         script: |
           cd ios
           pod install
           xcodebuild \
-            -workspace  NemesisAI.xcworkspace \
+            -workspace NemesisAI.xcworkspace \
             -scheme NemesisAI \
             -configuration Release \
             -sdk iphoneos \
@@ -27,12 +45,8 @@ workflows:
             build
           xcodebuild \
             -exportArchive \
-            -archivePath build/Release-iphoneos/YourApp.xcarchive \
-            -exportPath build/ios \
+            -archivePath build/Release-iphoneos/NemesisAI.xcarchive \
+            -exportPath ../build/ios \
             -exportOptionsPlist exportOptions.plist
     artifacts:
       - build/ios/**/*.ipa
-    publishing:
-      email:
-        recipients:
-          - grigorijv624@gmail.com
