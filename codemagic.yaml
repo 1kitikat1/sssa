@@ -1,15 +1,13 @@
-echo "name: Nemesis AI Build
-workflows:
+echo "workflows:
   ios-workflow:
     name: iOS Build
     instance_type: mac_mini_m1
-    max_build_duration: 30
     environment:
       ios_signing:
         distribution_type: development
-        bundle_id: 'com.Nemesis.AI'
+        bundle_id: com.Nemesis.AI
       vars:
-        APPLE_ID: 'grigorijv624@gmail.com'
+        APPLE_ID: grigorijv624@gmail.com
       node: 18
     scripts:
       - name: Install dependencies
@@ -19,4 +17,4 @@ workflows:
         script: |
           npx eas-cli build --platform ios --profile preview --non-interactive
     artifacts:
-      - /build/ios/ipa/*.ipa" > codemagic.yaml
+      - build/**/*.ipa" > codemagic.yaml
