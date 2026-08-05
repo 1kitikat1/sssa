@@ -2,7 +2,7 @@ name: Nemesis AI Build
 workflows:
   ios-workflow:
     instance_type: mac_mini_m1
-    max_build_duration: 30
+    max_build_duration: 45
     environment:
       vars:
         NODE_VERSION: 18
@@ -35,18 +35,25 @@ workflows:
         script: |
           cd ios
           pod install
-          xcodebuild \
+          # Archive
+          xcodebuild archive \
             -workspace NemesisAI.xcworkspace \
             -scheme NemesisAI \
             -configuration Release \
             -sdk iphoneos \
             -arch arm64 \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            DEVELOPMENT_TEAM= \
+            CODE_SIGN_IDENTITY= \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            -derivedDataPath build
+          # Export
           xcodebuild \
             -exportArchive \
-            -archivePath build/Release-iphoneos/NemesisAI.xcarchive \
-            -exportPath ../build/ios \
+            -archivePath build/Archive/NemesisAI.xcarchive \
+            -exportPath build/ios \
             -exportOptionsPlist exportOptions.plist
     artifacts:
       - build/ios/**/*.ipa
