@@ -415,39 +415,32 @@ const App = () => {
   };
 
   // ============================================================
-  //  ФОТО — ИСПРАВЛЕННАЯ ВЕРСИЯ
+  //  ФОТО — УПРОЩЁННАЯ ВЕРСИЯ
   // ============================================================
   const pickImage = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
       if (status !== 'granted') {
-        Alert.alert('⚠️', 'Нет доступа к галерее');
+        Alert.alert('Ошибка', 'Нет доступа к галерее');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.3,
-        base64: false,
+        mediaTypes: ImagePicker.MediaType.Images,
+        quality: 0.5,
       });
 
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        return;
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        const uri = result.assets[0].uri;
+        setImagePreview(uri);
+        setSelectedImage(uri);
+        
+        setTimeout(() => {
+          sendMessage();
+        }, 500);
       }
-
-      const uri = result.assets[0].uri;
-      
-      setImagePreview(uri);
-      setSelectedImage(uri);
-      
-      setTimeout(() => {
-        sendMessage();
-      }, 300);
-      
     } catch (error) {
-      console.error('❌ Ошибка выбора фото:', error);
+      console.log('Ошибка выбора фото:', error);
       Alert.alert('Ошибка', 'Не удалось выбрать фото');
     }
   };
@@ -617,7 +610,7 @@ const App = () => {
   };
 
   // ============================================================
-  //  ОТПРАВКА СООБЩЕНИЯ
+  //  ОТПРАВКА СООБЩЕНИЯ (БЕЗ ОГРАНИЧЕНИЙ)
   // ============================================================
   const sendMessage = async () => {
     if ((!inputText.trim() && !selectedImage) || isLoading || !currentUser || !currentChatId) return;
@@ -688,6 +681,7 @@ const App = () => {
       const apiKey = isPremium ? AGNES_API_KEY : KODIKROUTER_KEY;
       const model = isPremium ? AGNES_MODEL : FREE_MODEL;
 
+      // ПОЛНАЯ ИСТОРИЯ (без ограничений)
       const history = messages.map(m => ({
         role: m.isUser ? 'user' : 'assistant',
         content: m.text,
@@ -717,7 +711,7 @@ const App = () => {
           }
         ],
         max_tokens: roleConfig.maxTokens,
-        temperature: 0.5,
+        temperature: 0.7,
       };
 
       const response = await fetch(url, {
@@ -1090,7 +1084,6 @@ const App = () => {
                 </Text>
               </View>
 
-              {/* Подписка */}
               <View style={[styles.profileInfoItem, theme.border]}>
                 <Text style={[styles.profileInfoLabel, theme.text]}>💳 Подписка</Text>
                 <Text style={[styles.profileInfoValue, theme.textSecondary]}>
@@ -1098,7 +1091,6 @@ const App = () => {
                 </Text>
               </View>
 
-              {/* Сообщения */}
               <View style={[styles.profileInfoItem, theme.border]}>
                 <Text style={[styles.profileInfoLabel, theme.text]}>📊 Сообщений</Text>
                 <Text style={[styles.profileInfoValue, theme.textSecondary]}>
@@ -1106,7 +1098,6 @@ const App = () => {
                 </Text>
               </View>
 
-              {/* Язык */}
               <View style={[styles.profileInfoItem, theme.border]}>
                 <Text style={[styles.profileInfoLabel, theme.text]}>🌐 Язык</Text>
                 <Text style={[styles.profileInfoValue, theme.textSecondary]}>Русский 🇷🇺</Text>
