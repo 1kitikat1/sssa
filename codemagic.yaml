@@ -6,6 +6,8 @@ workflows:
     max_build_duration: 60
     environment:
       node: 20
+      vars:
+        EXPO_TOKEN: o7NSNtpiP0MLco__Nu37bUWuR35-UfySF7xaX_lp
     scripts:
       - name: Install dependencies
         script: |
@@ -14,6 +16,6 @@ workflows:
         script: |
           npx eas-cli build --platform ios --profile preview --non-interactive --local
     artifacts:
-      - /build/**/*.ipa
       - build-ios/**/*.ipa
+      - /build/**/*.ipa
       - ios/build/**/*.ipa
