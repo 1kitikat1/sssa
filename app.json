@@ -16,7 +16,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.kitikat.NemesisAI",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Приложению нужен доступ к галерее для отправки фото",
+        "NSCameraUsageDescription": "Приложению нужен доступ к камере для фото",
+        "NSMicrophoneUsageDescription": "Приложению нужен доступ к микрофону для видео"
       }
     },
     "android": {
@@ -25,13 +28,25 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Приложению нужен доступ к галерее для отправки фото",
+          "cameraPermission": "Приложению нужен доступ к камере для фото"
+        }
+      ]
     ],
     "extra": {
       "eas": {
