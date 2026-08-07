@@ -49,15 +49,11 @@ const auth = getAuth(app);
 const database = getDatabase(app);
 
 // ============================================================
-//  КОНСТАНТЫ
+//  КОНСТАНТЫ — MISTRAL AI (БЕСПЛАТНО)
 // ============================================================
-const KODIKROUTER_KEY = 'sk-kr_live_rnTTNnAsL5Wt4i4rxylCHWGCPfuI2do5';
-const KODIKROUTER_URL = 'https://api.kodikrouter.ru/v1/chat/completions';
-const FREE_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
-
-const AGNES_API_KEY = 'sk-9OBSttI1TxXspLMDenWdnk5nfuzJsRXAHvvI5fCO18SOZVj0';
-const AGNES_URL = 'https://apihub.agnes-ai.com/v1/chat/completions';
-const AGNES_MODEL = 'agnes-2.0-flash';
+const MISTRAL_API_KEY = 'WcvSpDWKCYTtMTnT6vMuQZVSW729Mvj4';
+const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
+const MISTRAL_MODEL = 'mistral-small-latest';
 
 // ============================================================
 //  ЖЁСТКИЙ СИСТЕМНЫЙ ПРОМПТ
@@ -415,7 +411,7 @@ const App = () => {
   };
 
   // ============================================================
-  //  ФОТО — УПРОЩЁННАЯ ВЕРСИЯ
+  //  ФОТО
   // ============================================================
   const pickImage = async () => {
     try {
@@ -610,7 +606,7 @@ const App = () => {
   };
 
   // ============================================================
-  //  ОТПРАВКА СООБЩЕНИЯ (БЕЗ ОГРАНИЧЕНИЙ)
+  //  ОТПРАВКА СООБЩЕНИЯ
   // ============================================================
   const sendMessage = async () => {
     if ((!inputText.trim() && !selectedImage) || isLoading || !currentUser || !currentChatId) return;
@@ -673,44 +669,26 @@ const App = () => {
         return;
       }
 
-      const isPremium = currentUser.role === 'ai_basic' || 
-                        currentUser.role === 'ai_max' || 
-                        currentUser.role === 'nemesis';
+      // ============================================================
+      //  MISTRAL AI
+      // ============================================================
+      const url = MISTRAL_URL;
+      const apiKey = MISTRAL_API_KEY;
+      const model = MISTRAL_MODEL;
 
-      const url = isPremium ? AGNES_URL : KODIKROUTER_URL;
-      const apiKey = isPremium ? AGNES_API_KEY : KODIKROUTER_KEY;
-      const model = isPremium ? AGNES_MODEL : FREE_MODEL;
-
-      // ПОЛНАЯ ИСТОРИЯ (без ограничений)
       const history = messages.map(m => ({
         role: m.isUser ? 'user' : 'assistant',
         content: m.text,
       }));
 
-      let userContent: any = text;
-      if (imageUrl) {
-        userContent = [
-          { type: 'text', text: text || 'Что на этом фото?' },
-          { type: 'image_url', image_url: { url: imageUrl } }
-        ];
-      }
-
-      const systemPrompt = {
-        role: 'system',
-        content: SYSTEM_PROMPT
-      };
-
       const requestBody = {
         model: model,
         messages: [
-          systemPrompt,
+          { role: 'system', content: SYSTEM_PROMPT },
           ...history,
-          {
-            role: 'user',
-            content: userContent,
-          }
+          { role: 'user', content: text }
         ],
-        max_tokens: roleConfig.maxTokens,
+        max_tokens: 500,
         temperature: 0.7,
       };
 
