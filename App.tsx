@@ -18,7 +18,6 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -30,6 +29,9 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { getDatabase, ref, get, set, push, update, remove, onValue } from 'firebase/database';
+import Animated, { FadeIn, SlideInRight, SlideInLeft, Layout, useSharedValue, withSpring } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import { Toast } from './components/Toast';
 
 // ============================================================
 //  FIREBASE КОНФИГ
@@ -184,7 +186,11 @@ const App = () => {
   const [activateKeyInput, setActivateKeyInput] = useState('');
   const [isActivating, setIsActivating] = useState(false);
   
+  // Toast
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'info' });
+  
   const scrollViewRef = useRef<ScrollView>(null);
+  const scale = useSharedValue(1);
 
   // ============================================================
   //  ЗАГРУЗКА ТЕМЫ И РАЗМЕРА + СОХРАНЁННЫЙ ЛОГИН
@@ -211,6 +217,7 @@ const App = () => {
     setIsDarkTheme(newTheme);
     try {
       await AsyncStorage.setItem('nemesis_theme', newTheme ? 'dark' : 'light');
+      showToast('Тема изменена', 'success');
     } catch (error) {
       console.error('Ошибка сохранения темы:', error);
     }
@@ -235,6 +242,10 @@ const App = () => {
     }
   };
 
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ visible: true, message, type });
+  };
+
   // ============================================================
   //  СОХРАНЕНИЕ АККАУНТА
   // ============================================================
@@ -254,7 +265,6 @@ const App = () => {
       if (email && password) {
         setLoginEmail(email);
         setLoginPassword(password);
-        // Автоматический вход
         await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (error) {
@@ -391,6 +401,7 @@ const App = () => {
     setCurrentChatId(chatId);
     setMessages([]);
     setActiveTab('chats');
+    showToast('✅ Новый чат создан!', 'success');
   };
 
   const deleteChat = async (chatId: string) => {
@@ -410,6 +421,7 @@ const App = () => {
               setCurrentChatId(null);
               setMessages([]);
             }
+            showToast('🗑️ Чат удалён', 'error');
           }
         }
       ]
@@ -417,21 +429,14 @@ const App = () => {
   };
 
   // ============================================================
-  //  ФОТО — ИСПРАВЛЕННАЯ ВЕРСИЯ
+  //  ФОТО
   // ============================================================
   const pickImage = async () => {
     try {
-      console.log('📸 Начинаем выбор фото...');
-      
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      console.log('📸 Статус разрешения:', status);
       
       if (status !== 'granted') {
-        Alert.alert(
-          '⚠️ Нет доступа к галерее',
-          'Разрешите доступ в настройках телефона',
-          [{ text: 'OK' }]
-        );
+        Alert.alert('⚠️', 'Нет доступа к галерее');
         return;
       }
 
@@ -442,37 +447,15 @@ const App = () => {
         base64: false,
       });
 
-      console.log('📸 Результат:', result);
-
-      if (result.canceled) {
-        console.log('📸 Пользователь отменил');
-        return;
-      }
-
-      if (!result.assets || result.assets.length === 0) {
-        Alert.alert('Ошибка', 'Не удалось получить фото');
+      if (result.canceled || !result.assets || result.assets.length === 0) {
         return;
       }
 
       const uri = result.assets[0].uri;
-      console.log('📸 URI фото:', uri);
-
-      const fileInfo = await FileSystem.getInfoAsync(uri);
-      console.log('📸 Информация о файле:', fileInfo);
       
-      if (!fileInfo.exists) {
-        Alert.alert('Ошибка', 'Файл не найден');
-        return;
-      }
-
-      const fileSize = fileInfo.size || 0;
-      if (fileSize > 2 * 1024 * 1024) {
-        Alert.alert('Ошибка', 'Файл слишком большой (>2MB)');
-        return;
-      }
-
       setImagePreview(uri);
       setSelectedImage(uri);
+      showToast('📸 Фото выбрано', 'success');
       
       setTimeout(() => {
         sendMessage();
@@ -480,7 +463,7 @@ const App = () => {
       
     } catch (error) {
       console.error('❌ Ошибка выбора фото:', error);
-      Alert.alert('Ошибка', 'Не удалось выбрать фото: ' + String(error));
+      Alert.alert('Ошибка', 'Не удалось выбрать фото');
     }
   };
 
@@ -575,7 +558,7 @@ const App = () => {
       setCurrentUser({ ...currentUser, role: newRole });
       setActivateKeyInput('');
       setIsActivating(false);
-      Alert.alert('✅ Успешно!', `Подписка активирована! Роль: ${newRole.toUpperCase()}`);
+      showToast(`✅ Роль: ${newRole.toUpperCase()}`, 'success');
     } catch (error) {
       Alert.alert('Ошибка', 'Не удалось активировать ключ');
       setIsActivating(false);
@@ -593,6 +576,7 @@ const App = () => {
       await saveUserSession(loginEmail, loginPassword);
       setLoginEmail('');
       setLoginPassword('');
+      showToast('✅ Добро пожаловать!', 'success');
     } catch (error: any) {
       Alert.alert('Ошибка входа', error.message);
     }
@@ -643,6 +627,7 @@ const App = () => {
       setChats([]);
       setMessages([]);
       setCurrentChatId(null);
+      showToast('👋 Вы вышли', 'info');
     } catch (error: any) {
       Alert.alert('Ошибка', error.message);
     }
@@ -857,12 +842,20 @@ const App = () => {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={[styles.container, theme.container]}>
+          <Toast 
+            visible={toast.visible} 
+            message={toast.message} 
+            type={toast.type}
+            onHide={() => setToast({ ...toast, visible: false })}
+          />
           <View style={styles.authContainer}>
-            <Text style={[styles.authTitle, theme.text]}>🤖 Nemesis AI</Text>
-            <Text style={[styles.authSubtitle, theme.textSecondary]}>Создан командой Kotik Team</Text>
+            <Animated.View entering={FadeIn.duration(800)}>
+              <Text style={[styles.authTitle, theme.text]}>🤖 Nemesis AI</Text>
+              <Text style={[styles.authSubtitle, theme.textSecondary]}>Создан командой Kotik Team</Text>
+            </Animated.View>
 
             {!showRegister ? (
-              <View style={[styles.authForm, theme.card]}>
+              <Animated.View entering={SlideInRight.duration(400)} style={[styles.authForm, theme.card]}>
                 <Text style={[styles.authFormTitle, theme.text]}>Вход</Text>
                 <TextInput
                   style={[styles.authInput, theme.input]}
@@ -887,9 +880,9 @@ const App = () => {
                 <TouchableOpacity onPress={() => setShowRegister(true)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Нет аккаунта? Зарегистрироваться</Text>
                 </TouchableOpacity>
-              </View>
+              </Animated.View>
             ) : (
-              <View style={[styles.authForm, theme.card]}>
+              <Animated.View entering={SlideInRight.duration(400)} style={[styles.authForm, theme.card]}>
                 <Text style={[styles.authFormTitle, theme.text]}>Регистрация</Text>
                 <TextInput
                   style={[styles.authInput, theme.input]}
@@ -921,7 +914,7 @@ const App = () => {
                 <TouchableOpacity onPress={() => setShowRegister(false)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Уже есть аккаунт? Войти</Text>
                 </TouchableOpacity>
-              </View>
+              </Animated.View>
             )}
           </View>
         </SafeAreaView>
@@ -933,6 +926,13 @@ const App = () => {
     <SafeAreaProvider>
       <SafeAreaView style={[styles.container, theme.container]}>
         <StatusBar barStyle={isDarkTheme ? 'light-content' : 'dark-content'} backgroundColor={theme.statusBar} />
+        
+        <Toast 
+          visible={toast.visible} 
+          message={toast.message} 
+          type={toast.type}
+          onHide={() => setToast({ ...toast, visible: false })}
+        />
         
         <View style={[styles.header, theme.header]}>
           <TouchableOpacity 
@@ -982,18 +982,27 @@ const App = () => {
                       scrollViewRef.current?.scrollToEnd({ animated: true });
                     }}
                   >
-                    {messages.map((msg) => {
+                    {messages.map((msg, index) => {
                       const isUser = msg.isUser;
                       return (
-                        <View key={msg.id} style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}>
+                        <Animated.View 
+                          key={msg.id}
+                          entering={isUser ? 
+                            SlideInRight.duration(300).delay(index * 30) : 
+                            SlideInLeft.duration(300).delay(index * 30)
+                          }
+                          layout={Layout.springify().damping(20)}
+                          style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}
+                        >
                           <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.aiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
-                            {!isUser && <Text style={[styles.aiLabel, theme.primary]}>🤖 Nemesis AI</Text>}
+                            {!isUser && <Text style={[styles.aiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
                             
                             {msg.imageUrl && (
-                              <Image 
+                              <Animated.Image 
                                 source={{ uri: msg.imageUrl }} 
                                 style={styles.messageImage}
                                 resizeMode="cover"
+                                entering={FadeIn.duration(400)}
                               />
                             )}
                             
@@ -1007,7 +1016,7 @@ const App = () => {
                               {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                             </Text>
                           </View>
-                        </View>
+                        </Animated.View>
                       );
                     })}
                     {isLoading && (
@@ -1053,13 +1062,23 @@ const App = () => {
                         maxLength={1000}
                         editable={!isLoading && !isUploading}
                       />
-                      <TouchableOpacity
-                        style={[styles.sendButton, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.sendButtonDisabled : null]}
-                        onPress={sendMessage}
-                        disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
-                      >
-                        <Text style={styles.sendButtonText}>📤</Text>
-                      </TouchableOpacity>
+                      <Animated.View style={{ transform: [{ scale }] }}>
+                        <TouchableOpacity
+                          style={[styles.sendButton, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.sendButtonDisabled : null]}
+                          onPress={sendMessage}
+                          onPressIn={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            scale.value = withSpring(0.85);
+                          }}
+                          onPressOut={() => {
+                            scale.value = withSpring(1);
+                          }}
+                          disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.sendButtonText}>📤</Text>
+                        </TouchableOpacity>
+                      </Animated.View>
                     </View>
                   </View>
                 </KeyboardAvoidingView>
@@ -1169,6 +1188,7 @@ const App = () => {
                       const newSize = Math.max(12, fontSize - 2);
                       setFontSize(newSize);
                       saveFontSize(newSize);
+                      showToast(`Размер: ${newSize}`, 'info');
                     }}
                     style={{ padding: 8 }}
                   >
@@ -1182,12 +1202,42 @@ const App = () => {
                       const newSize = Math.min(24, fontSize + 2);
                       setFontSize(newSize);
                       saveFontSize(newSize);
+                      showToast(`Размер: ${newSize}`, 'info');
                     }}
                     style={{ padding: 8 }}
                   >
                     <Text style={{ fontSize: 20, color: '#6c63ff' }}>+</Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>💳 Подписка</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>
+                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
+                </Text>
+              </View>
+
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📊 Сообщений</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>
+                  {messages.length}
+                </Text>
+              </View>
+
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🌐 Язык</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>Русский 🇷🇺</Text>
+              </View>
+
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🔔 Уведомления</Text>
+                <Switch
+                  value={true}
+                  onValueChange={() => showToast('Уведомления включены', 'success')}
+                  trackColor={{ false: '#767577', true: '#6c63ff' }}
+                  thumbColor={'#fff'}
+                />
               </View>
               
               {(currentUser?.role === 'ai_basic' || 
@@ -1202,11 +1252,26 @@ const App = () => {
                 </TouchableOpacity>
               )}
               
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📱 Версия</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>2.0.0</Text>
-              </View>
+              <TouchableOpacity 
+                style={[styles.settingsItem, theme.border, { paddingVertical: 14 }]}
+                onPress={() => Alert.alert(
+                  '🗑️ Удалить аккаунт',
+                  'Вы уверены? Это действие нельзя отменить.',
+                  [
+                    { text: 'Отмена', style: 'cancel' },
+                    { text: 'Удалить', style: 'destructive' }
+                  ]
+                )}
+              >
+                <Text style={[styles.settingsItemLabel, { fontSize: fontSize, color: '#ff4455' }]}>🗑️ Удалить аккаунт</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>→</Text>
+              </TouchableOpacity>
               
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>ℹ️ О приложении</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>v2.0.0</Text>
+              </View>
+
               <View style={[styles.settingsItem, theme.border]}>
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>👥 Команда</Text>
                 <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>Kotik Team</Text>
