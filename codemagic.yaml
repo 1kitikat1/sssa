@@ -3,49 +3,17 @@ workflows:
   ios-workflow:
     name: iOS Build
     instance_type: mac_mini_m1
-    max_build_duration: 45
+    max_build_duration: 60
     environment:
       node: 20
     scripts:
       - name: Install dependencies
         script: |
           npm install
-          npx expo install expo-image-picker
-      - name: Prebuild iOS
+      - name: Build with EAS
         script: |
-          npx expo prebuild --platform ios --clean
-      - name: Install Pods
-        script: |
-          cd ios
-          pod install
-          cd ..
-      - name: Build iOS
-        script: |
-          cd ios
-          xcodebuild \
-            -workspace NemesisAI.xcworkspace \
-            -scheme NemesisAI \
-            -configuration Release \
-            -sdk iphoneos \
-            -arch arm64 \
-            -derivedDataPath build
-          
-          # Найди .app
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" 2>/dev/null | head -1)
-          if [ -z "$APP_PATH" ]; then
-            APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
-          fi
-          
-          echo "✅ App found: $APP_PATH"
-          
-          # Создай IPA
-          mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
-          zip -r NemesisAI.ipa Payload/
-          mv NemesisAI.ipa ../build/ios/
-          rm -rf Payload
-          cd ..
+          npx eas-cli build --platform ios --profile preview --non-interactive --local
     artifacts:
-      - build/ios/NemesisAI.ipa
-      - ios/NemesisAI.ipa
-      - NemesisAI.ipa
+      - /build/**/*.ipa
+      - build-ios/**/*.ipa
+      - ios/build/**/*.ipa
