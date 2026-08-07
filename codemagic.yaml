@@ -7,15 +7,11 @@ workflows:
     environment:
       vars:
         NODE_VERSION: 18
-        APPLE_ID: grigorijv624@gmail.com
-      ios_signing:
-        distribution_type: development
-        bundle_identifier: com.kitikat.nemesisai
     scripts:
       - name: Install dependencies
         script: |
           npm install
-      - name: Build iOS
+      - name: Build iOS (unsigned)
         script: |
           npx expo prebuild --platform ios --clean
           cd ios
@@ -26,6 +22,7 @@ workflows:
             -configuration Release \
             -sdk iphoneos \
             -arch arm64 \
+            CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath build
           
           # Найди .app
