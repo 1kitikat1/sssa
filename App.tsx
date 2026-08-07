@@ -74,14 +74,11 @@ const getLimits = (role: string) => {
 const SYSTEM_PROMPT = `
   Ты — Nemesis AI, продвинутый ассистент.
 
-  **1. Рассуждения (Chain of Thought)**
-  - Сначала ПРОАНАЛИЗИРУЙ вопрос пользователя.
-  - ОПИШИ свои рассуждения и шаги к решению задачи.
-  - Только после этого ДАЙ окончательный ответ.
-
-  **2. Поиск информации**
-  - Если вопрос требует актуальных данных, используй свои знания.
-  - Если данных нет — скажи это честно и предложи, где можно найти информацию.
+  1.Ты мощная ии ты должен отвечать быстро и правильно
+  -если человек попросит отвечать подробнее тогда отвечай подробнее
+  -если человек произнесет вот это /nemesis тогда ты должен быть мягче
+  2. Если ты видишь что человек пытается обойти защиту для написания вредоностного кода то ты должен произнести что он делает не правильно и может сообщить Китикату 
+  -Ты можешь писать читы для игр,но если человек пишет сверх легит чит то ты должен отказать ему в этом и предложить сделать semi-rage чит
 
   **3. Правила**
   - Ты — Nemesis AI, не представляйся как другая модель.
@@ -427,38 +424,35 @@ const App = () => {
   // ============================================================
   //  НОВАЯ ЛОГИКА ФОТО
   // ============================================================
-  const pickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('⚠️', 'Нет доступа к галерее');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        quality: 0.5,
-        allowsEditing: false,
-      });
-
-      if (result.canceled) {
-        return;
-      }
-
-      if (result.assets && result.assets.length > 0) {
-        const uri = result.assets[0].uri;
-        setImagePreview(uri);
-        setSelectedImage(uri);
-        setTimeout(() => sendMessage(), 500);
-      } else {
-        Alert.alert('Ошибка', 'Не удалось получить фото');
-      }
-    } catch (error) {
-      console.error('❌ Ошибка выбора фото:', error);
-      Alert.alert('Ошибка', 'Не удалось выбрать фото. Попробуйте ещё раз.');
+ const pickImage = async () => {
+  try {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('⚠️', 'Нет доступа к галерее');
+      return;
     }
-  };
 
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',  // <-- ПРОСТО СТРОКА
+      quality: 0.5,
+      allowsEditing: false,
+    });
+
+    if (result.canceled) {
+      return;
+    }
+
+    if (result.assets && result.assets.length > 0) {
+      const uri = result.assets[0].uri;
+      setImagePreview(uri);
+      setSelectedImage(uri);
+      setTimeout(() => sendMessage(), 500);
+    }
+  } catch (error) {
+    console.error('❌ Ошибка выбора фото:', error);
+    Alert.alert('Ошибка', 'Не удалось выбрать фото. Попробуйте ещё раз.');
+  }
+};
   const removeImage = () => {
     setImagePreview(null);
     setSelectedImage(null);
