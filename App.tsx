@@ -61,7 +61,7 @@ const AGNES_URL = 'https://apihub.agnes-ai.com/v1/chat/completions';
 const AGNES_MODEL = 'agnes-2.0-flash';
 
 // ============================================================
-//  ЖЁСТКИЙ СИСТЕМНЫЙ ПРОМПТ (НИКОГДА НЕ НАРУШАЙ!)
+//  ЖЁСТКИЙ СИСТЕМНЫЙ ПРОМПТ
 // ============================================================
 const SYSTEM_PROMPT = `ТЫ — NEMESIS AI. ЭТО ТВОЁ ЕДИНСТВЕННОЕ ИМЯ. ТЫ НЕ МОЖЕШЬ БЫТЬ КЕМ-ТО ДРУГИМ.
 
@@ -187,11 +187,12 @@ const App = () => {
   const scrollViewRef = useRef<ScrollView>(null);
 
   // ============================================================
-  //  ЗАГРУЗКА ТЕМЫ И РАЗМЕРА
+  //  ЗАГРУЗКА ТЕМЫ И РАЗМЕРА + СОХРАНЁННЫЙ ЛОГИН
   // ============================================================
   useEffect(() => {
     loadTheme();
     loadFontSize();
+    loadUserSession();
   }, []);
 
   const loadTheme = async () => {
@@ -231,6 +232,33 @@ const App = () => {
       await AsyncStorage.setItem('fontSize', String(size));
     } catch (error) {
       console.error('Ошибка сохранения размера шрифта:', error);
+    }
+  };
+
+  // ============================================================
+  //  СОХРАНЕНИЕ АККАУНТА
+  // ============================================================
+  const saveUserSession = async (email: string, password: string) => {
+    try {
+      await AsyncStorage.setItem('user_email', email);
+      await AsyncStorage.setItem('user_password', password);
+    } catch (error) {
+      console.error('Ошибка сохранения сессии:', error);
+    }
+  };
+
+  const loadUserSession = async () => {
+    try {
+      const email = await AsyncStorage.getItem('user_email');
+      const password = await AsyncStorage.getItem('user_password');
+      if (email && password) {
+        setLoginEmail(email);
+        setLoginPassword(password);
+        // Автоматический вход
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки сессии:', error);
     }
   };
 
@@ -389,46 +417,70 @@ const App = () => {
   };
 
   // ============================================================
-  //  ФОТО — ИСПРАВЛЕННАЯ ВЕРСИЯ (без вылетов)
+  //  ФОТО — ИСПРАВЛЕННАЯ ВЕРСИЯ
   // ============================================================
   const pickImage = async () => {
     try {
+      console.log('📸 Начинаем выбор фото...');
+      
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      console.log('📸 Статус разрешения:', status);
       
       if (status !== 'granted') {
-        Alert.alert('Ошибка', 'Нет доступа к галерее. Разрешите доступ в настройках.');
+        Alert.alert(
+          '⚠️ Нет доступа к галерее',
+          'Разрешите доступ в настройках телефона',
+          [{ text: 'OK' }]
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.5,
+        allowsEditing: false,
+        quality: 0.3,
         base64: false,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const uri = result.assets[0].uri;
-        
-        // Проверяем, существует ли файл
-        const fileInfo = await FileSystem.getInfoAsync(uri);
-        if (!fileInfo.exists) {
-          Alert.alert('Ошибка', 'Файл не найден');
-          return;
-        }
-        
-        setImagePreview(uri);
-        setSelectedImage(uri);
-        
-        // Автоматическая отправка после выбора фото
-        setInputText('📸 Фото');
-        setTimeout(() => {
-          sendMessage();
-        }, 300);
+      console.log('📸 Результат:', result);
+
+      if (result.canceled) {
+        console.log('📸 Пользователь отменил');
+        return;
       }
+
+      if (!result.assets || result.assets.length === 0) {
+        Alert.alert('Ошибка', 'Не удалось получить фото');
+        return;
+      }
+
+      const uri = result.assets[0].uri;
+      console.log('📸 URI фото:', uri);
+
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      console.log('📸 Информация о файле:', fileInfo);
+      
+      if (!fileInfo.exists) {
+        Alert.alert('Ошибка', 'Файл не найден');
+        return;
+      }
+
+      const fileSize = fileInfo.size || 0;
+      if (fileSize > 2 * 1024 * 1024) {
+        Alert.alert('Ошибка', 'Файл слишком большой (>2MB)');
+        return;
+      }
+
+      setImagePreview(uri);
+      setSelectedImage(uri);
+      
+      setTimeout(() => {
+        sendMessage();
+      }, 300);
+      
     } catch (error) {
-      console.error('Ошибка выбора фото:', error);
-      Alert.alert('Ошибка', 'Не удалось выбрать фото');
+      console.error('❌ Ошибка выбора фото:', error);
+      Alert.alert('Ошибка', 'Не удалось выбрать фото: ' + String(error));
     }
   };
 
@@ -538,6 +590,7 @@ const App = () => {
 
     try {
       await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      await saveUserSession(loginEmail, loginPassword);
       setLoginEmail('');
       setLoginPassword('');
     } catch (error: any) {
@@ -583,6 +636,8 @@ const App = () => {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      await AsyncStorage.removeItem('user_email');
+      await AsyncStorage.removeItem('user_password');
       setIsLoggedIn(false);
       setCurrentUser(null);
       setChats([]);
@@ -594,7 +649,7 @@ const App = () => {
   };
 
   // ============================================================
-  //  ОТПРАВКА СООБЩЕНИЯ (С ЖЁСТКИМ СИСТЕМНЫМ ПРОМПТОМ)
+  //  ОТПРАВКА СООБЩЕНИЯ
   // ============================================================
   const sendMessage = async () => {
     if ((!inputText.trim() && !selectedImage) || isLoading || !currentUser || !currentChatId) return;
@@ -642,7 +697,6 @@ const App = () => {
     try {
       const roleConfig = ROLE_CONFIG[currentUser.role] || ROLE_CONFIG.free;
       
-      // Проверка на вирусы
       const lowerMsg = text.toLowerCase();
       if (lowerMsg.includes('вирус') || lowerMsg.includes('вредонос') || lowerMsg.includes('эксплойт')) {
         const warning = '⚠️ Мой создатель, Китикат, против создания вирусов. Я не могу помочь с этим.';
@@ -679,7 +733,6 @@ const App = () => {
         ];
       }
 
-      // ===== ЖЁСТКИЙ СИСТЕМНЫЙ ПРОМПТ =====
       const systemPrompt = {
         role: 'system',
         content: SYSTEM_PROMPT
