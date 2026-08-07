@@ -49,14 +49,14 @@ const auth = getAuth(app);
 const database = getDatabase(app);
 
 // ============================================================
-//  КОНСТАНТЫ — MISTRAL AI (БЕСПЛАТНО)
+//  КОНСТАНТЫ
 // ============================================================
 const MISTRAL_API_KEY = 'WcvSpDWKCYTtMTnT6vMuQZVSW729Mvj4';
 const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
 const MISTRAL_MODEL = 'mistral-small-latest';
 
 // ============================================================
-//  ЖЁСТКИЙ СИСТЕМНЫЙ ПРОМПТ
+//  СИСТЕМНЫЙ ПРОМПТ
 // ============================================================
 const SYSTEM_PROMPT = `ТЫ — NEMESIS AI. ЭТО ТВОЁ ЕДИНСТВЕННОЕ ИМЯ. ТЫ НЕ МОЖЕШЬ БЫТЬ КЕМ-ТО ДРУГИМ.
 
@@ -411,33 +411,51 @@ const App = () => {
   };
 
   // ============================================================
-  //  ФОТО
+  //  ФОТО — ИСПРАВЛЕННАЯ ЛОГИКА
   // ============================================================
   const pickImage = async () => {
     try {
+      // Запрашиваем разрешение
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
       if (status !== 'granted') {
-        Alert.alert('Ошибка', 'Нет доступа к галерее');
+        Alert.alert('⚠️', 'Нет доступа к галерее');
         return;
       }
 
+      // Открываем галерею
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaType.Images,
         quality: 0.5,
+        allowsEditing: false,
       });
 
-      if (!result.canceled && result.assets?.[0]?.uri) {
-        const uri = result.assets[0].uri;
-        setImagePreview(uri);
-        setSelectedImage(uri);
-        
-        setTimeout(() => {
-          sendMessage();
-        }, 500);
+      // Проверяем результат
+      if (result.canceled) {
+        console.log('📸 Пользователь отменил выбор');
+        return;
       }
+
+      if (!result.assets || result.assets.length === 0) {
+        Alert.alert('Ошибка', 'Не удалось получить фото');
+        return;
+      }
+
+      const uri = result.assets[0].uri;
+      console.log('📸 Фото выбрано:', uri);
+      
+      // Сохраняем и отправляем
+      setImagePreview(uri);
+      setSelectedImage(uri);
+      
+      // Автоотправка через 500ms
+      setTimeout(() => {
+        sendMessage();
+      }, 500);
+      
     } catch (error) {
-      console.log('Ошибка выбора фото:', error);
-      Alert.alert('Ошибка', 'Не удалось выбрать фото');
+      console.error('❌ Ошибка выбора фото:', error);
+      Alert.alert('Ошибка', 'Не удалось выбрать фото. Попробуйте ещё раз.');
     }
   };
 
@@ -606,7 +624,7 @@ const App = () => {
   };
 
   // ============================================================
-  //  ОТПРАВКА СООБЩЕНИЯ
+  //  ОТПРАВКА СООБЩЕНИЯ (MISTRAL AI)
   // ============================================================
   const sendMessage = async () => {
     if ((!inputText.trim() && !selectedImage) || isLoading || !currentUser || !currentChatId) return;
@@ -681,12 +699,15 @@ const App = () => {
         content: m.text,
       }));
 
+      // Mistral не поддерживает фото, отправляем только текст
+      const userContent = text;
+
       const requestBody = {
         model: model,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           ...history,
-          { role: 'user', content: text }
+          { role: 'user', content: userContent }
         ],
         max_tokens: 500,
         temperature: 0.7,
