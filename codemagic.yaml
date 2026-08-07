@@ -3,19 +3,22 @@ workflows:
   ios-workflow:
     name: iOS Build
     instance_type: mac_mini_m1
-    max_build_duration: 45
+    max_build_duration: 60
     environment:
-      vars:
-        NODE_VERSION: 18
+      node: 20
     scripts:
       - name: Install dependencies
         script: |
           npm install
-      - name: Build iOS (unsigned)
+      - name: Prebuild
         script: |
           npx expo prebuild --platform ios --clean
+      - name: Install Pods
+        script: |
+          cd ios && pod install && cd ..
+      - name: Build IPA (unsigned)
+        script: |
           cd ios
-          pod install
           xcodebuild \
             -workspace NemesisAI.xcworkspace \
             -scheme NemesisAI \
@@ -25,7 +28,6 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath build
           
-          # Найди .app
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
             APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
@@ -33,7 +35,6 @@ workflows:
           
           echo "✅ App found: $APP_PATH"
           
-          # Создай IPA
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r NemesisAI.ipa Payload/
