@@ -7,8 +7,7 @@ workflows:
     environment:
       ios_signing:
         distribution_type: development
-
-      "bundleIdentifier": "com.kitikat.nemesisai"
+        bundle_id: com.kitikat.nemesisai
         apple_id: grigorijv624@gmail.com
         automatic_code_signing: true
       vars:
@@ -17,14 +16,10 @@ workflows:
       - name: Install dependencies
         script: |
           npm install
-      - name: Install Expo CLI
+      - name: Build with EAS
         script: |
-          npm install -g expo-cli eas-cli
-      - name: Build with EAS (local)
-        script: |
-          eas build --platform ios --profile preview --non-interactive --local
+          npx eas-cli build --platform ios --profile preview --non-interactive --local
     artifacts:
       - /build/**/*.ipa
       - build-ios/**/*.ipa
       - ios/build/**/*.ipa
-      - /Users/builder/clone/**/*.ipa
