@@ -7,9 +7,8 @@ workflows:
     environment:
       ios_signing:
         distribution_type: development
-        bundle_id: com.kitikat.nemesisai
+        bundle_identifier: com.kitikat.nemesisai
         apple_id: grigorijv624@gmail.com
-        team_id: ""
         automatic_code_signing: true
       vars:
         NODE_VERSION: 18
