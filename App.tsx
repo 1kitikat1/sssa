@@ -29,9 +29,6 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { getDatabase, ref, get, set, push, update, remove, onValue } from 'firebase/database';
-import Animated, { FadeIn, SlideInRight, SlideInLeft, Layout, useSharedValue, withSpring } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
-import { Toast } from './components/Toast';
 
 // ============================================================
 //  FIREBASE КОНФИГ
@@ -186,11 +183,7 @@ const App = () => {
   const [activateKeyInput, setActivateKeyInput] = useState('');
   const [isActivating, setIsActivating] = useState(false);
   
-  // Toast
-  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'info' });
-  
   const scrollViewRef = useRef<ScrollView>(null);
-  const scale = useSharedValue(1);
 
   // ============================================================
   //  ЗАГРУЗКА ТЕМЫ И РАЗМЕРА + СОХРАНЁННЫЙ ЛОГИН
@@ -217,7 +210,6 @@ const App = () => {
     setIsDarkTheme(newTheme);
     try {
       await AsyncStorage.setItem('nemesis_theme', newTheme ? 'dark' : 'light');
-      showToast('Тема изменена', 'success');
     } catch (error) {
       console.error('Ошибка сохранения темы:', error);
     }
@@ -240,10 +232,6 @@ const App = () => {
     } catch (error) {
       console.error('Ошибка сохранения размера шрифта:', error);
     }
-  };
-
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    setToast({ visible: true, message, type });
   };
 
   // ============================================================
@@ -401,7 +389,6 @@ const App = () => {
     setCurrentChatId(chatId);
     setMessages([]);
     setActiveTab('chats');
-    showToast('✅ Новый чат создан!', 'success');
   };
 
   const deleteChat = async (chatId: string) => {
@@ -421,7 +408,6 @@ const App = () => {
               setCurrentChatId(null);
               setMessages([]);
             }
-            showToast('🗑️ Чат удалён', 'error');
           }
         }
       ]
@@ -455,7 +441,6 @@ const App = () => {
       
       setImagePreview(uri);
       setSelectedImage(uri);
-      showToast('📸 Фото выбрано', 'success');
       
       setTimeout(() => {
         sendMessage();
@@ -558,7 +543,7 @@ const App = () => {
       setCurrentUser({ ...currentUser, role: newRole });
       setActivateKeyInput('');
       setIsActivating(false);
-      showToast(`✅ Роль: ${newRole.toUpperCase()}`, 'success');
+      Alert.alert('✅ Успешно!', `Подписка активирована! Роль: ${newRole.toUpperCase()}`);
     } catch (error) {
       Alert.alert('Ошибка', 'Не удалось активировать ключ');
       setIsActivating(false);
@@ -576,7 +561,6 @@ const App = () => {
       await saveUserSession(loginEmail, loginPassword);
       setLoginEmail('');
       setLoginPassword('');
-      showToast('✅ Добро пожаловать!', 'success');
     } catch (error: any) {
       Alert.alert('Ошибка входа', error.message);
     }
@@ -627,7 +611,6 @@ const App = () => {
       setChats([]);
       setMessages([]);
       setCurrentChatId(null);
-      showToast('👋 Вы вышли', 'info');
     } catch (error: any) {
       Alert.alert('Ошибка', error.message);
     }
@@ -842,20 +825,12 @@ const App = () => {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={[styles.container, theme.container]}>
-          <Toast 
-            visible={toast.visible} 
-            message={toast.message} 
-            type={toast.type}
-            onHide={() => setToast({ ...toast, visible: false })}
-          />
           <View style={styles.authContainer}>
-            <Animated.View entering={FadeIn.duration(800)}>
-              <Text style={[styles.authTitle, theme.text]}>🤖 Nemesis AI</Text>
-              <Text style={[styles.authSubtitle, theme.textSecondary]}>Создан командой Kotik Team</Text>
-            </Animated.View>
+            <Text style={[styles.authTitle, theme.text]}>🤖 Nemesis AI</Text>
+            <Text style={[styles.authSubtitle, theme.textSecondary]}>Создан командой Kotik Team</Text>
 
             {!showRegister ? (
-              <Animated.View entering={SlideInRight.duration(400)} style={[styles.authForm, theme.card]}>
+              <View style={[styles.authForm, theme.card]}>
                 <Text style={[styles.authFormTitle, theme.text]}>Вход</Text>
                 <TextInput
                   style={[styles.authInput, theme.input]}
@@ -880,9 +855,9 @@ const App = () => {
                 <TouchableOpacity onPress={() => setShowRegister(true)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Нет аккаунта? Зарегистрироваться</Text>
                 </TouchableOpacity>
-              </Animated.View>
+              </View>
             ) : (
-              <Animated.View entering={SlideInRight.duration(400)} style={[styles.authForm, theme.card]}>
+              <View style={[styles.authForm, theme.card]}>
                 <Text style={[styles.authFormTitle, theme.text]}>Регистрация</Text>
                 <TextInput
                   style={[styles.authInput, theme.input]}
@@ -914,7 +889,7 @@ const App = () => {
                 <TouchableOpacity onPress={() => setShowRegister(false)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Уже есть аккаунт? Войти</Text>
                 </TouchableOpacity>
-              </Animated.View>
+              </View>
             )}
           </View>
         </SafeAreaView>
@@ -926,13 +901,6 @@ const App = () => {
     <SafeAreaProvider>
       <SafeAreaView style={[styles.container, theme.container]}>
         <StatusBar barStyle={isDarkTheme ? 'light-content' : 'dark-content'} backgroundColor={theme.statusBar} />
-        
-        <Toast 
-          visible={toast.visible} 
-          message={toast.message} 
-          type={toast.type}
-          onHide={() => setToast({ ...toast, visible: false })}
-        />
         
         <View style={[styles.header, theme.header]}>
           <TouchableOpacity 
@@ -982,27 +950,18 @@ const App = () => {
                       scrollViewRef.current?.scrollToEnd({ animated: true });
                     }}
                   >
-                    {messages.map((msg, index) => {
+                    {messages.map((msg) => {
                       const isUser = msg.isUser;
                       return (
-                        <Animated.View 
-                          key={msg.id}
-                          entering={isUser ? 
-                            SlideInRight.duration(300).delay(index * 30) : 
-                            SlideInLeft.duration(300).delay(index * 30)
-                          }
-                          layout={Layout.springify().damping(20)}
-                          style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}
-                        >
+                        <View key={msg.id} style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}>
                           <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.aiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
                             {!isUser && <Text style={[styles.aiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
                             
                             {msg.imageUrl && (
-                              <Animated.Image 
+                              <Image 
                                 source={{ uri: msg.imageUrl }} 
                                 style={styles.messageImage}
                                 resizeMode="cover"
-                                entering={FadeIn.duration(400)}
                               />
                             )}
                             
@@ -1016,7 +975,7 @@ const App = () => {
                               {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                             </Text>
                           </View>
-                        </Animated.View>
+                        </View>
                       );
                     })}
                     {isLoading && (
@@ -1062,23 +1021,13 @@ const App = () => {
                         maxLength={1000}
                         editable={!isLoading && !isUploading}
                       />
-                      <Animated.View style={{ transform: [{ scale }] }}>
-                        <TouchableOpacity
-                          style={[styles.sendButton, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.sendButtonDisabled : null]}
-                          onPress={sendMessage}
-                          onPressIn={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            scale.value = withSpring(0.85);
-                          }}
-                          onPressOut={() => {
-                            scale.value = withSpring(1);
-                          }}
-                          disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={styles.sendButtonText}>📤</Text>
-                        </TouchableOpacity>
-                      </Animated.View>
+                      <TouchableOpacity
+                        style={[styles.sendButton, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.sendButtonDisabled : null]}
+                        onPress={sendMessage}
+                        disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
+                      >
+                        <Text style={styles.sendButtonText}>📤</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </KeyboardAvoidingView>
@@ -1188,7 +1137,6 @@ const App = () => {
                       const newSize = Math.max(12, fontSize - 2);
                       setFontSize(newSize);
                       saveFontSize(newSize);
-                      showToast(`Размер: ${newSize}`, 'info');
                     }}
                     style={{ padding: 8 }}
                   >
@@ -1202,7 +1150,6 @@ const App = () => {
                       const newSize = Math.min(24, fontSize + 2);
                       setFontSize(newSize);
                       saveFontSize(newSize);
-                      showToast(`Размер: ${newSize}`, 'info');
                     }}
                     style={{ padding: 8 }}
                   >
@@ -1234,7 +1181,7 @@ const App = () => {
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🔔 Уведомления</Text>
                 <Switch
                   value={true}
-                  onValueChange={() => showToast('Уведомления включены', 'success')}
+                  onValueChange={() => {}}
                   trackColor={{ false: '#767577', true: '#6c63ff' }}
                   thumbColor={'#fff'}
                 />
