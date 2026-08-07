@@ -5,24 +5,25 @@ workflows:
     instance_type: mac_mini_m1
     max_build_duration: 45
     environment:
-      vars:
-        NODE_VERSION: 18
+      node: 18
     scripts:
       - name: Install dependencies
         script: |
           npm install
-      - name: Build iOS (unsigned)
+          npx expo install expo-image-picker
+          cd ios && pod install && cd ..
+      - name: Prebuild
         script: |
           npx expo prebuild --platform ios --clean
+      - name: Build iOS
+        script: |
           cd ios
-          pod install
           xcodebuild \
             -workspace NemesisAI.xcworkspace \
             -scheme NemesisAI \
             -configuration Release \
             -sdk iphoneos \
             -arch arm64 \
-            CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath build
           
           # Найди .app
