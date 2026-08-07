@@ -8,7 +8,6 @@ workflows:
       vars:
         NODE_VERSION: 18
         APPLE_ID: grigorijv624@gmail.com
-        APPLE_TEAM_ID: ""
       ios_signing:
         distribution_type: development
         bundle_identifier: com.kitikat.nemesisai
