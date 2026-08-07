@@ -7,7 +7,8 @@ workflows:
     environment:
       ios_signing:
         distribution_type: development
-        bundle_id: com.Nemesis.AI
+
+      "bundleIdentifier": "com.kitikat.nemesisai" // или другой
         apple_id: grigorijv624@gmail.com
         automatic_code_signing: true
       vars:
