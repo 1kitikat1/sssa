@@ -1,20 +1,44 @@
-echo "workflows:
+name: Nemesis AI Build
+workflows:
   ios-workflow:
-    name: iOS Build
     instance_type: mac_mini_m1
+    max_build_duration: 45
     environment:
-      ios_signing:
-        distribution_type: development
-        bundle_id: com.Nemesis.AI
       vars:
-        APPLE_ID: grigorijv624@gmail.com
-      node: 18
+        NODE_VERSION: 18
     scripts:
       - name: Install dependencies
         script: |
-          npm install
+          npm ci
+      - name: Prebuild iOS
+        script: |
+          npx expo prebuild --platform ios --clean
       - name: Build iOS
         script: |
-          npx eas-cli build --platform ios --profile preview --non-interactive
+          cd ios
+          pod install
+          xcodebuild \
+            -workspace NemesisAI.xcworkspace \
+            -scheme NemesisAI \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath build
+          # Найди .app файл
+          APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
+          echo "Found app: $APP_PATH"
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: .app not found!"
+            find build -name "*.app" 2>/dev/null
+            exit 1
+          fi
+          # Упакуй в IPA
+          mkdir -p ../build/ios/Payload
+          cp -r "$APP_PATH" ../build/ios/Payload/
+          cd ../build/ios
+          zip -r NemesisAI.ipa Payload/
+          rm -rf Payload
+          ls -la
     artifacts:
-      - build/**/*.ipa" > codemagic.yaml
+      - build/ios/*.ipa
