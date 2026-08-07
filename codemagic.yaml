@@ -5,16 +5,20 @@ workflows:
     instance_type: mac_mini_m1
     max_build_duration: 45
     environment:
-      node: 18
+      node: 20
     scripts:
       - name: Install dependencies
         script: |
           npm install
           npx expo install expo-image-picker
-          cd ios && pod install && cd ..
-      - name: Prebuild
+      - name: Prebuild iOS
         script: |
           npx expo prebuild --platform ios --clean
+      - name: Install Pods
+        script: |
+          cd ios
+          pod install
+          cd ..
       - name: Build iOS
         script: |
           cd ios
