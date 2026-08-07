@@ -415,7 +415,7 @@ const App = () => {
   };
 
   // ============================================================
-  //  ФОТО
+  //  ФОТО — ИСПРАВЛЕННАЯ ВЕРСИЯ
   // ============================================================
   const pickImage = async () => {
     try {
@@ -1089,15 +1089,30 @@ const App = () => {
                   {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
                 </Text>
               </View>
+
+              {/* Подписка */}
+              <View style={[styles.profileInfoItem, theme.border]}>
+                <Text style={[styles.profileInfoLabel, theme.text]}>💳 Подписка</Text>
+                <Text style={[styles.profileInfoValue, theme.textSecondary]}>
+                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
+                </Text>
+              </View>
+
+              {/* Сообщения */}
+              <View style={[styles.profileInfoItem, theme.border]}>
+                <Text style={[styles.profileInfoLabel, theme.text]}>📊 Сообщений</Text>
+                <Text style={[styles.profileInfoValue, theme.textSecondary]}>
+                  {messages.length}
+                </Text>
+              </View>
+
+              {/* Язык */}
+              <View style={[styles.profileInfoItem, theme.border]}>
+                <Text style={[styles.profileInfoLabel, theme.text]}>🌐 Язык</Text>
+                <Text style={[styles.profileInfoValue, theme.textSecondary]}>Русский 🇷🇺</Text>
+              </View>
               
               <View style={[styles.profileDivider, theme.border]} />
-              
-              <TouchableOpacity 
-                style={[styles.profileButton, theme.card]}
-                onPress={() => Alert.alert('Информация', 'Настройки аккаунта')}
-              >
-                <Text style={[styles.profileButtonText, theme.text, { fontSize: fontSize }]}>🔧 Настройки аккаунта</Text>
-              </TouchableOpacity>
               
               <TouchableOpacity 
                 style={[styles.profileButton, theme.card]}
@@ -1107,7 +1122,39 @@ const App = () => {
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={[styles.profileButton, styles.profileButtonLogout, theme.card]}
+                style={[styles.profileButton, { borderColor: '#ff4455', marginTop: 8 }]}
+                onPress={() => Alert.alert(
+                  '🗑️ Удалить аккаунт',
+                  'Вы уверены? Это действие нельзя отменить. Все данные будут потеряны.',
+                  [
+                    { text: 'Отмена', style: 'cancel' },
+                    { 
+                      text: 'Удалить', 
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          const user = auth.currentUser;
+                          if (user) {
+                            await user.delete();
+                            await AsyncStorage.removeItem('user_email');
+                            await AsyncStorage.removeItem('user_password');
+                            setIsLoggedIn(false);
+                            setCurrentUser(null);
+                            Alert.alert('✅', 'Аккаунт удалён');
+                          }
+                        } catch (error: any) {
+                          Alert.alert('Ошибка', error.message);
+                        }
+                      }
+                    }
+                  ]
+                )}
+              >
+                <Text style={[styles.profileButtonText, { color: '#ff4455', fontSize: fontSize }]}>🗑️ Удалить аккаунт</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.profileButton, styles.profileButtonLogout, theme.card, { marginTop: 8 }]}
                 onPress={handleLogout}
               >
                 <Text style={[styles.profileButtonText, styles.profileButtonTextLogout, { fontSize: fontSize }]}>🚪 Выйти</Text>
@@ -1158,35 +1205,6 @@ const App = () => {
                 </View>
               </View>
 
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>💳 Подписка</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>
-                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
-                </Text>
-              </View>
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📊 Сообщений</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>
-                  {messages.length}
-                </Text>
-              </View>
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🌐 Язык</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>Русский 🇷🇺</Text>
-              </View>
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🔔 Уведомления</Text>
-                <Switch
-                  value={true}
-                  onValueChange={() => {}}
-                  trackColor={{ false: '#767577', true: '#6c63ff' }}
-                  thumbColor={'#fff'}
-                />
-              </View>
-              
               {(currentUser?.role === 'ai_basic' || 
                 currentUser?.role === 'ai_max' || 
                 currentUser?.role === 'nemesis') && (
@@ -1198,21 +1216,6 @@ const App = () => {
                   <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>→</Text>
                 </TouchableOpacity>
               )}
-              
-              <TouchableOpacity 
-                style={[styles.settingsItem, theme.border, { paddingVertical: 14 }]}
-                onPress={() => Alert.alert(
-                  '🗑️ Удалить аккаунт',
-                  'Вы уверены? Это действие нельзя отменить.',
-                  [
-                    { text: 'Отмена', style: 'cancel' },
-                    { text: 'Удалить', style: 'destructive' }
-                  ]
-                )}
-              >
-                <Text style={[styles.settingsItemLabel, { fontSize: fontSize, color: '#ff4455' }]}>🗑️ Удалить аккаунт</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>→</Text>
-              </TouchableOpacity>
               
               <View style={[styles.settingsItem, theme.border]}>
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>ℹ️ О приложении</Text>
@@ -1368,6 +1371,9 @@ const styles = StyleSheet.create({
   profileEmail: { fontSize: 14, marginBottom: 16 },
   profileRoleLabel: { fontSize: 14, marginRight: 8 },
   profileRole: { fontSize: 16, fontWeight: '600' },
+  profileInfoItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1 },
+  profileInfoLabel: { fontSize: 15 },
+  profileInfoValue: { fontSize: 14 },
   profileDivider: { height: 1, marginVertical: 16 },
   profileButton: { borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1 },
   profileButtonText: { fontSize: 14 },
