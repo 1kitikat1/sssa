@@ -1,0 +1,17 @@
+# project.yml
+name: NemesisAI
+options:
+  bundleIdPrefix: com.nemesis
+  deploymentTarget:
+    iOS: 15.0
+targets:
+  NemesisAI:
+    type: application
+    platform: iOS
+    sources:
+      - path: NemesisAI
+    settings:
+      base:
+        INFOPLIST_FILE: NemesisAI/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.nemesis.ai
+        CODE_SIGN_STYLE: Automatic
