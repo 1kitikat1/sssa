@@ -16,6 +16,10 @@ workflows:
         script: |
           npm install
 
+      - name: Install Expo modules used by App.tsx
+        script: |
+          npx expo install expo-clipboard expo-linear-gradient react-native-webview
+
       - name: Prebuild
         script: |
           npx expo prebuild --platform ios --clean
