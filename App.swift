@@ -11,7 +11,6 @@ import FirebaseAuth
 import FirebaseDatabase
 import Combine
 import UIKit
-import WebKit
 
 // MARK: - App Delegate
 class AppDelegate: NSObject, UIApplicationDelegate {
@@ -77,6 +76,8 @@ class AuthManager: ObservableObject {
     
     func signIn(email: String, password: String, completion: @escaping (Bool) -> Void) {
         isLoading = true
+        errorMessage = nil
+        
         auth.signIn(withEmail: email, password: password) { [weak self] result, error in
             self?.isLoading = false
             if let error = error {
@@ -95,6 +96,8 @@ class AuthManager: ObservableObject {
     
     func signUp(email: String, password: String, username: String, completion: @escaping (Bool) -> Void) {
         isLoading = true
+        errorMessage = nil
+        
         auth.createUser(withEmail: email, password: password) { [weak self] result, error in
             self?.isLoading = false
             if let error = error {
@@ -222,6 +225,7 @@ enum UserRole: String {
     case aiBasic = "ai_basic"
     case aiMax = "ai_max"
     case nemesis = "nemesis"
+    case lynx = "lynx"
     
     var displayName: String {
         switch self {
@@ -230,17 +234,31 @@ enum UserRole: String {
         case .aiBasic: return "🧠 AI+"
         case .aiMax: return "🚀 AI MAX"
         case .nemesis: return "👑 NEMESIS"
+        case .lynx: return "🐆 LYNX"
         }
     }
     
     var maxTokens: Int {
         switch self {
         case .free, .elite: return 1500
-        case .aiBasic, .aiMax, .nemesis: return 5000
+        case .aiBasic, .aiMax, .nemesis, .lynx: return 5000
         }
     }
     
-    var canGenerateKeys: Bool { return self == .nemesis }
+    var canGenerateKeys: Bool {
+        return self == .nemesis
+    }
+    
+    var color: Color {
+        switch self {
+        case .free: return .gray
+        case .elite: return Color(red: 108/255, green: 99/255, blue: 255/255)
+        case .aiBasic: return Color(red: 108/255, green: 99/255, blue: 255/255)
+        case .aiMax: return .yellow
+        case .nemesis: return .yellow
+        case .lynx: return Color(red: 0/255, green: 200/255, blue: 255/255)
+        }
+    }
 }
 
 struct Message: Identifiable {
@@ -257,12 +275,42 @@ struct Message: Identifiable {
     }
 }
 
-struct Chat: Identifiable {
-    let id: String
-    var title: String
-    var messages: [Message]
-    let createdAt: TimeInterval
-    var updatedAt: TimeInterval
+// MARK: - Stars View
+struct StarsView: View {
+    let starCount = 120
+    
+    var body: some View {
+        Canvas { context, size in
+            for _ in 0..<starCount {
+                let x = CGFloat.random(in: 0...size.width)
+                let y = CGFloat.random(in: 0...size.height)
+                let radius = CGFloat.random(in: 0.5...2)
+                let opacity = Double.random(in: 0.2...0.9)
+                
+                context.fill(
+                    Path(ellipseIn: CGRect(x: x, y: y, width: radius * 2, height: radius * 2)),
+                    with: .color(.white.opacity(opacity))
+                )
+            }
+        }
+        .ignoresSafeArea()
+        .opacity(0.6)
+    }
+}
+
+// MARK: - Custom Text Field Style
+struct CustomTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .padding()
+            .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.05))
+            .cornerRadius(12)
+            .foregroundColor(.white)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.06), lineWidth: 1)
+            )
+    }
 }
 
 // MARK: - Auth View
@@ -272,18 +320,15 @@ struct AuthView: View {
     @State private var password = ""
     @State private var username = ""
     @State private var isRegister = false
-    @State private var showError = false
     
     var body: some View {
         ZStack {
             Color(red: 7/255, green: 7/255, blue: 13/255)
                 .ignoresSafeArea()
             
-            // Звёзды
             StarsView()
             
             VStack(spacing: 30) {
-                // Лого
                 VStack(spacing: 8) {
                     Text("NEMESIS")
                         .font(.system(size: 42, weight: .black))
@@ -295,7 +340,6 @@ struct AuthView: View {
                 }
                 .padding(.top, 40)
                 
-                // Форма
                 VStack(spacing: 16) {
                     Text(isRegister ? "СОЗДАЙТЕ АККАУНТ" : "ВХОД")
                         .font(.headline)
@@ -377,54 +421,16 @@ struct AuthView: View {
             }
             authManager.signUp(email: email, password: password, username: username) { success in
                 if !success {
-                    showError = true
+                    // show error
                 }
             }
         } else {
             authManager.signIn(email: email, password: password) { success in
                 if !success {
-                    showError = true
+                    // show error
                 }
             }
         }
-    }
-}
-
-// MARK: - Stars View
-struct StarsView: View {
-    let starCount = 120
-    
-    var body: some View {
-        Canvas { context, size in
-            for _ in 0..<starCount {
-                let x = CGFloat.random(in: 0...size.width)
-                let y = CGFloat.random(in: 0...size.height)
-                let radius = CGFloat.random(in: 0.5...2)
-                let opacity = Double.random(in: 0.2...0.9)
-                
-                context.fill(
-                    Path(ellipseIn: CGRect(x: x, y: y, width: radius * 2, height: radius * 2)),
-                    with: .color(.white.opacity(opacity))
-                )
-            }
-        }
-        .ignoresSafeArea()
-        .opacity(0.6)
-    }
-}
-
-// MARK: - Custom Text Field Style
-struct CustomTextFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
-            .padding()
-            .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.05))
-            .cornerRadius(12)
-            .foregroundColor(.white)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.06), lineWidth: 1)
-            )
     }
 }
 
@@ -457,7 +463,6 @@ struct MainTabView: View {
 // MARK: - Home View
 struct HomeView: View {
     @EnvironmentObject var authManager: AuthManager
-    @State private var showKeyActivation = false
     @State private var keyInput = ""
     @State private var keyStatus = ""
     
@@ -490,7 +495,7 @@ struct HomeView: View {
                             ProductCard(
                                 icon: "🖥️",
                                 title: "Nemesis Steam",
-                                description: "Лаунчер + оптимизация. Повысь FPS до +40%",
+                                description: "Лаунчер + оптимизация",
                                 tag: "FREE / ELITE"
                             )
                             
@@ -516,14 +521,14 @@ struct HomeView: View {
                             TariffCard(
                                 title: "FREE",
                                 price: "0 ₽",
-                                features: ["Steam (база)", "Прицел", "Утилиты", "ИИ (базовый)"],
-                                isActive: true
+                                features: ["Steam (база)", "Прицел", "Утилиты"],
+                                isActive: authManager.currentUser?.role == .free
                             )
                             
                             TariffCard(
                                 title: "ELITE",
                                 price: "199 ₽",
-                                features: ["Steam (полная)", "Всё из FREE", "Приоритетная поддержка"],
+                                features: ["Steam (полная)", "Всё из FREE", "Приоритет"],
                                 badge: "🔥 ПОПУЛЯРНЫЙ",
                                 isActive: authManager.currentUser?.role == .elite
                             )
@@ -538,9 +543,18 @@ struct HomeView: View {
                             TariffCard(
                                 title: "AI MAX",
                                 price: "299 ₽",
-                                features: ["Steam (полная)", "ИИ (полный)", "Всё из ELITE и AI+"],
+                                features: ["Steam + ИИ", "Всё из ELITE и AI+", "Эксклюзив"],
                                 badge: "👑 ВСЁ ВКЛЮЧЕНО",
                                 isActive: authManager.currentUser?.role == .aiMax
+                            )
+                            
+                            TariffCard(
+                                title: "LYNX",
+                                price: "🐆",
+                                features: ["Эксклюзивный доступ", "Ранний доступ к фичам", "Особый статус"],
+                                badge: "🐆 ОСОБЫЙ",
+                                isActive: authManager.currentUser?.role == .lynx,
+                                role: .lynx
                             )
                         }
                         .padding(.horizontal)
@@ -573,7 +587,7 @@ struct HomeView: View {
                             .font(.caption)
                             .foregroundColor(keyStatus.contains("✅") ? .green : .red)
                     }
-                    .padding(.vertical)
+                    .padding()
                     .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
                     .cornerRadius(20)
                     .padding(.horizontal)
@@ -663,6 +677,11 @@ struct TariffCard: View {
     let features: [String]
     var badge: String? = nil
     var isActive: Bool = false
+    var role: UserRole? = nil
+    
+    var roleColor: Color {
+        role?.color ?? Color(red: 108/255, green: 99/255, blue: 255/255)
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -686,8 +705,8 @@ struct TariffCard: View {
                         .fontWeight(.bold)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
-                        .background(Color(red: 108/255, green: 99/255, blue: 255/255).opacity(0.2))
-                        .foregroundColor(Color(red: 108/255, green: 99/255, blue: 255/255))
+                        .background(roleColor.opacity(0.2))
+                        .foregroundColor(roleColor)
                         .cornerRadius(20)
                 }
                 
@@ -706,7 +725,7 @@ struct TariffCard: View {
             ForEach(features, id: \.self) { feature in
                 HStack {
                     Text("✦")
-                        .foregroundColor(Color(red: 108/255, green: 99/255, blue: 255/255))
+                        .foregroundColor(roleColor)
                     Text(feature)
                         .font(.subheadline)
                         .foregroundColor(Color(red: 170/255, green: 170/255, blue: 204/255))
@@ -718,7 +737,12 @@ struct TariffCard: View {
         .cornerRadius(16)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(isActive ? Color.green.opacity(0.3) : Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.05), lineWidth: 1)
+                .stroke(
+                    isActive ? roleColor.opacity(0.4) :
+                    (role == .lynx ? Color(red: 0/255, green: 200/255, blue: 255/255).opacity(0.2) :
+                    Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.05)),
+                    lineWidth: role == .lynx ? 2 : 1
+                )
         )
     }
 }
@@ -733,7 +757,6 @@ struct ChatView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Сообщения
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
@@ -762,7 +785,6 @@ struct ChatView: View {
                     }
                 }
                 
-                // Ввод
                 VStack(spacing: 8) {
                     HStack(spacing: 12) {
                         TextField("Напиши сообщение...", text: $inputText)
@@ -808,17 +830,18 @@ struct ChatView: View {
     
     func sendMessage() {
         guard !inputText.isEmpty, !isSending else { return }
-        let userMessage = Message(role: .user, content: inputText, imageUrl: nil)
+        let userMessage = Message(role: .user, content: inputText, imageUrl: nil, timestamp: Date().timeIntervalSince1970)
         messages.append(userMessage)
         inputText = ""
         isSending = true
         
-        // Имитация ответа AI (в реальном приложении здесь был бы запрос к API)
+        // Имитация ответа AI
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             let assistantMessage = Message(
                 role: .assistant,
                 content: "Это тестовый ответ от Nemesis AI. В реальном приложении здесь будет ответ от нейросети! 😊",
-                imageUrl: nil
+                imageUrl: nil,
+                timestamp: Date().timeIntervalSince1970
             )
             messages.append(assistantMessage)
             isSending = false
@@ -868,6 +891,8 @@ struct MessageBubble: View {
 // MARK: - Profile View
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
+    @State private var showKeyAlert = false
+    @State private var generatedKey = ""
     
     var body: some View {
         NavigationView {
@@ -877,8 +902,7 @@ struct ProfileView: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [Color(red: 108/255, green: 99/255, blue: 255/255),
-                                        Color(red: 167/255, green: 139/255, blue: 250/255)],
+                                colors: [user.role.color, user.role.color.opacity(0.6)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -907,15 +931,8 @@ struct ProfileView: View {
                         .font(.headline)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
-                        .background(
-                            user.role == .nemesis ?
-                            Color.yellow.opacity(0.2) :
-                            Color(red: 108/255, green: 99/255, blue: 255/255).opacity(0.15)
-                        )
-                        .foregroundColor(
-                            user.role == .nemesis ? .yellow :
-                            Color(red: 108/255, green: 99/255, blue: 255/255)
-                        )
+                        .background(user.role.color.opacity(0.15))
+                        .foregroundColor(user.role.color)
                         .cornerRadius(20)
                     
                     // Статистика
@@ -953,7 +970,7 @@ struct ProfileView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color(red: 255/255, green: 215/255, blue: 0/255).opacity(0.1))
+                            .background(Color.yellow.opacity(0.1))
                             .foregroundColor(.yellow)
                             .cornerRadius(12)
                         }
@@ -990,25 +1007,19 @@ struct ProfileView: View {
                 }
             }
         }
+        .alert("👑 Новый ключ", isPresented: $showKeyAlert) {
+            Button("Скопировать") {
+                UIPasteboard.general.string = generatedKey
+            }
+            Button("Закрыть", role: .cancel) { }
+        } message: {
+            Text(generatedKey)
+        }
     }
     
     func generateKey() {
         let key = "NEM-" + UUID().uuidString.prefix(8).uppercased() + "-" + UUID().uuidString.prefix(6).uppercased()
-        // В реальном приложении ключ сохраняется в Firebase
-        // Пока просто показываем алерт
-        let alert = UIAlertController(
-            title: "👑 Новый ключ",
-            message: key,
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Скопировать", style: .default) { _ in
-            UIPasteboard.general.string = key
-        })
-        alert.addAction(UIAlertAction(title: "Закрыть", style: .cancel))
-        
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let rootVC = windowScene.windows.first?.rootViewController {
-            rootVC.present(alert, animated: true)
-        }
+        generatedKey = key
+        showKeyAlert = true
     }
 }
