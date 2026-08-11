@@ -17,26 +17,18 @@ workflows:
 
       - name: Check files
         script: |
-          echo "📁 Current directory:"
+          echo "📁 Files in root:"
           ls -la
-          echo "📁 Checking if App.swift exists:"
-          ls -la NemesisAI/App.swift || echo "❌ App.swift not found in NemesisAI/"
+          echo "📁 Checking App.swift..."
+          cat App.swift | head -5 || echo "❌ App.swift not found!"
 
       - name: Generate Xcode project
         script: |
           xcodegen generate
 
-      - name: List generated project
-        script: |
-          ls -la NemesisAI.xcodeproj/
-
       - name: Install Pods
         script: |
           pod install
-
-      - name: List workspace
-        script: |
-          ls -la *.xcworkspace || echo "❌ No workspace found"
 
       - name: Build IPA
         script: |
