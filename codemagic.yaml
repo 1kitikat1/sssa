@@ -1,37 +1,52 @@
-workflows:
-  ios-native:
-    name: iOS Native Build
-    instance_type: mac_mini_m1
-    max_build_duration: 60
-    environment:
-      xcode: latest
-      cocoapods: default
-    cache:
-      cache_paths:
-        - ~/.cocoapods
-        - ios/Pods
-    scripts:
-      - name: Install Pods
-        script: |
-          pod install
+scripts:
+  - name: Install xcodegen
+    script: |
+      brew install xcodegen
 
-      - name: Build IPA
-        script: |
-          set -e
-          xcodebuild \
-            -workspace NemesisAI.xcworkspace \
-            -scheme NemesisAI \
-            -configuration Release \
-            -sdk iphoneos \
-            -arch arm64 \
-            CODE_SIGNING_ALLOWED=NO \
-            -derivedDataPath build
+  - name: Generate Xcode project
+    script: |
+      xcodegen generate
 
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -1)
-          mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
-          zip -r NemesisAI.ipa Payload/
-          mkdir -p build/ios
-          mv NemesisAI.ipa build/ios/
-    artifacts:
-      - build/ios/NemesisAI.ipa
+  - name: Install Pods
+    script: |
+      pod install
+
+  - name: Build IPA
+    script: |
+      set -e
+      
+      # Находим workspace
+      WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+      if [ -z "$WORKSPACE" ]; then
+        echo "❌ Workspace not found!"
+        exit 1
+      fi
+      
+      echo "📦 Using workspace: $WORKSPACE"
+
+      xcodebuild \
+        -workspace "$WORKSPACE" \
+        -scheme NemesisAI \
+        -configuration Release \
+        -sdk iphoneos \
+        -arch arm64 \
+        CODE_SIGNING_ALLOWED=NO \
+        -derivedDataPath build
+
+      APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -1)
+      
+      if [ -z "$APP_PATH" ]; then
+        echo "❌ App not found!"
+        exit 1
+      fi
+
+      echo "✅ App found: $APP_PATH"
+
+      mkdir -p Payload
+      cp -r "$APP_PATH" Payload/
+      zip -r NemesisAI.ipa Payload/
+      
+      mkdir -p build/ios
+      mv NemesisAI.ipa build/ios/
+      
+      echo "✅ Build complete!"
