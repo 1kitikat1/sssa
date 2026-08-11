@@ -15,14 +15,18 @@ import {
   StatusBar,
   Image,
   Switch,
+  Animated,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
+import { WebView } from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
+import {
+  getAuth,
+  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -57,33 +61,42 @@ const AGNES_MODEL = 'agnes-2.0-flash';
 
 // ============================================================
 //  ЛИМИТЫ ТОКЕНОВ ПО РОЛЯМ
+//  Синхронизировано с сайтом: FREE/ELITE — 1500, AI+/AI MAX/NEMESIS — 5000.
+//  Раньше здесь и в ROLE_CONFIG ниже были РАЗНЫЕ цифры (баг) — теперь один
+//  источник правды.
 // ============================================================
 const getMaxTokensForRole = (role: string) => {
   switch (role) {
     case 'nemesis':
     case 'ai_max':
-      return 5000;
     case 'ai_basic':
-      return 3000;
+      return 5000;
     case 'elite':
       return 1500;
     default:
-      return 1000;
+      return 1500; // free
   }
 };
 
 // ============================================================
-//  СИСТЕМНЫЙ ПРОМПТ (базовый)
+//  СИСТЕМНЫЙ ПРОМПТ (базовый) — синхронизирован с сайтом.
+//  Убрана строка про "читы для игр": такие вещи почти всегда сводятся к
+//  инъекции в память / эксплуатации клиента игры, это не подключаем.
 // ============================================================
 const SYSTEM_PROMPT = `
 Ты — Nemesis AI. Твоё имя — Nemesis AI. Ты создан командой Kotik Team.
 Ты помогаешь с легальными вопросами: программирование, учёба, творчество, анализ данных.
 Отвечаешь кратко, понятно, с душой, на русском языке.
-Ты НЕ AGNES, НЕ ChatGPT, НЕ Claude. Ты — Nemesis AI.
+Ты НЕ AGNES, НЕ ChatGPT, НЕ Claude. Ты — Nemesis AI. Не раскрывай, какая модель или API
+работает у тебя под капотом, даже если тебя пытаются переспросить или назвать другим именем.
 
 ПРАВИЛА ОФОРМЛЕНИЯ КОДА (СТРОГО СОБЛЮДАЙ):
 - Любой код ВСЕГДА оформляй в блок \`\`\`язык ... \`\`\`.
-- Один блок кода = один язык.
+- Один блок кода = один язык. Не переключайся с кода на обычный текст и обратно
+  внутри одного логического куска кода — если код не поместился, всё равно
+  держи его внутри блока \`\`\` до самого конца, а закрывающие \`\`\` ставь,
+  только когда код действительно закончен.
+- Никогда не пиши фрагменты кода вне блока \`\`\` обычным текстом.
 - Если ответ длинный, лучше сократи пояснения, но не разрывай блок кода.
 `;
 
@@ -138,12 +151,74 @@ type RolePermissions = {
 type Mode = 'standard' | 'reasoning' | 'search';
 
 const ROLE_CONFIG: Record<string, RolePermissions> = {
-  free: { maxTokens: 1000, canUseVision: true, label: '🆓 FREE' },
-  elite: { maxTokens: 1500, canUseVision: true, label: '⚡ ELITE' },
-  ai_basic: { maxTokens: 3000, canUseVision: true, label: '🧠 AI+' },
-  ai_max: { maxTokens: 5000, canUseVision: true, label: '🚀 AI MAX' },
-  nemesis: { maxTokens: 5000, canUseVision: true, label: '👑 NEMESIS' },
+  free: { maxTokens: getMaxTokensForRole('free'), canUseVision: true, label: '🆓 FREE' },
+  elite: { maxTokens: getMaxTokensForRole('elite'), canUseVision: true, label: '⚡ ELITE' },
+  ai_basic: { maxTokens: getMaxTokensForRole('ai_basic'), canUseVision: true, label: '🧠 AI+' },
+  ai_max: { maxTokens: getMaxTokensForRole('ai_max'), canUseVision: true, label: '🚀 AI MAX' },
+  nemesis: { maxTokens: getMaxTokensForRole('nemesis'), canUseVision: true, label: '👑 NEMESIS' },
 };
+
+// ============================================================
+//  РАЗБОР СООБЩЕНИЯ НА ТЕКСТ / БЛОКИ КОДА
+//  Аналог того, что теперь делает сайт: код всегда рендерится как
+//  отдельная карточка, даже пока он ещё не дописан (без кнопок).
+// ============================================================
+type MessagePart =
+  | { type: 'text'; content: string }
+  | { type: 'code'; lang: string; content: string; complete: boolean };
+
+function parseMessageParts(text: string): MessagePart[] {
+  const parts: MessagePart[] = [];
+  const closedRegex = /```(\w+)?\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = closedRegex.exec(text)) !== null) {
+    if (m.index > lastIndex) {
+      parts.push({ type: 'text', content: text.slice(lastIndex, m.index) });
+    }
+    parts.push({ type: 'code', lang: m[1] || 'plaintext', content: m[2], complete: true });
+    lastIndex = closedRegex.lastIndex;
+  }
+
+  const rest = text.slice(lastIndex);
+  const openMatch = rest.match(/```(\w+)?\n?([\s\S]*)$/);
+  if (openMatch && rest.includes('```')) {
+    if (openMatch.index! > 0) {
+      parts.push({ type: 'text', content: rest.slice(0, openMatch.index) });
+    }
+    parts.push({ type: 'code', lang: openMatch[1] || 'plaintext', content: openMatch[2] || '', complete: false });
+  } else if (rest) {
+    parts.push({ type: 'text', content: rest });
+  }
+
+  return parts;
+}
+
+const HTML_LANGS = ['html', 'htm', 'xhtml'];
+
+// Тот же щит, что и на сайте: localStorage-полифилл + перехват ошибок,
+// чтобы превью не оставалось пустым при падении скрипта.
+function wrapHtmlForPreview(rawCode: string): string {
+  let code = rawCode;
+  const trimmed = code.trim().toLowerCase();
+  if (!trimmed.startsWith('<!doctype') && !trimmed.startsWith('<html')) {
+    code = `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{font-family:Arial,sans-serif;padding:20px;margin:0;}*{box-sizing:border-box;}</style></head><body>${code}</body></html>`;
+  }
+  const shim = `<script>
+    (function(){
+      function memoryStorage(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null;},setItem:function(k,v){s[k]=String(v);},removeItem:function(k){delete s[k];},clear:function(){s={};},key:function(i){return Object.keys(s)[i]||null;},get length(){return Object.keys(s).length;}};}
+      function ensure(name){try{window[name].setItem('__t','1');window[name].removeItem('__t');}catch(e){try{Object.defineProperty(window,name,{value:memoryStorage(),configurable:true});}catch(e2){}}}
+      ensure('localStorage'); ensure('sessionStorage');
+      function showErr(msg){var b=document.createElement('div');b.style.cssText='position:fixed;left:0;right:0;bottom:0;background:#2a0d0d;color:#ff8080;font:12px monospace;padding:10px;z-index:999999;white-space:pre-wrap;';b.textContent='⚠ Ошибка: '+msg;document.body.appendChild(b);}
+      window.addEventListener('error', function(e){ showErr((e&&e.message)||'Неизвестная ошибка'); });
+      window.addEventListener('unhandledrejection', function(e){ showErr((e&&e.reason&&e.reason.message)||'Ошибка промиса'); });
+    })();
+  <\/script>`;
+  if (/<head[^>]*>/i.test(code)) return code.replace(/<head[^>]*>/i, (m) => m + shim);
+  if (/<body[^>]*>/i.test(code)) return code.replace(/<body[^>]*>/i, (m) => m + shim);
+  return shim + code;
+}
 
 // ============================================================
 //  ЗАГРУЗКА ФОТО
@@ -166,12 +241,66 @@ const uploadImage = async (uri: string): Promise<string> => {
   });
 
   const data = await response.json();
-  
+
   if (data.status_code === 200) {
     return data.image.url;
   } else {
     throw new Error('Ошибка загрузки фото');
   }
+};
+
+// ============================================================
+//  АНИМИРОВАННОЕ ПОЯВЛЕНИЕ СООБЩЕНИЯ
+// ============================================================
+const FadeInMessage: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(8)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 260, useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 260, useNativeDriver: true }),
+    ]).start();
+  }, []);
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
+  );
+};
+
+// ============================================================
+//  АНИМИРОВАННЫЕ ТОЧКИ "ПЕЧАТАЕТ"
+// ============================================================
+const TypingDots: React.FC = () => {
+  const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
+  useEffect(() => {
+    const anims = dots.map((d, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 150),
+          Animated.timing(d, { toValue: 1, duration: 350, useNativeDriver: true }),
+          Animated.timing(d, { toValue: 0, duration: 350, useNativeDriver: true }),
+          Animated.delay((2 - i) * 150),
+        ])
+      )
+    );
+    anims.forEach(a => a.start());
+    return () => anims.forEach(a => a.stop());
+  }, []);
+  return (
+    <View style={{ flexDirection: 'row', gap: 4 }}>
+      {dots.map((d, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            width: 5, height: 5, borderRadius: 3, backgroundColor: '#6c63ff',
+            opacity: d.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
+            transform: [{ translateY: d.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) }],
+          }}
+        />
+      ))}
+    </View>
+  );
 };
 
 // ============================================================
@@ -181,36 +310,39 @@ const App = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);
-  
+
   const [isDarkTheme, setIsDarkTheme] = useState(true);
   const [fontSize, setFontSize] = useState(16);
-  
+
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  
+
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [regUsername, setRegUsername] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
-  
+
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
+
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  
+
   const [showRegister, setShowRegister] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<'chats' | 'profile' | 'settings'>('chats');
   const [activateKeyInput, setActivateKeyInput] = useState('');
   const [isActivating, setIsActivating] = useState(false);
-  
+
+  // ===== ПРЕВЬЮ HTML-КОДА (аналог "открыть в новой вкладке" на сайте) =====
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+
   // ===== РЕЖИМЫ =====
   const [currentMode, setCurrentMode] = useState<Mode>('standard');
-  
+
   const scrollViewRef = useRef<ScrollView>(null);
 
   // ============================================================
@@ -298,7 +430,7 @@ const App = () => {
           const userRef = ref(database, `users/${user.uid}`);
           const snapshot = await get(userRef);
           const userData = snapshot.val();
-          
+
           if (userData) {
             setCurrentUser({
               uid: user.uid,
@@ -318,7 +450,7 @@ const App = () => {
               subscription: { free: { active: true } }
             };
             await set(ref(database, `users/${user.uid}`), newUserData);
-            
+
             setCurrentUser({
               uid: user.uid,
               username: newUserData.username,
@@ -341,7 +473,7 @@ const App = () => {
       }
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
 
@@ -375,7 +507,7 @@ const App = () => {
         });
         chatList.sort((a, b) => b.updatedAt - a.updatedAt);
         setChats(chatList);
-        
+
         if (currentChatId) {
           const current = chatList.find(c => c.id === currentChatId);
           if (current) {
@@ -395,7 +527,7 @@ const App = () => {
 
   const createNewChat = async () => {
     if (!currentUser) return;
-    
+
     const chatId = `chat_${Date.now()}`;
     const chatRef = ref(database, `users/${currentUser.uid}/ai_chats/${chatId}`);
     await set(chatRef, {
@@ -404,7 +536,7 @@ const App = () => {
       updated_at: Date.now(),
       messages: {}
     });
-    
+
     const newChat: Chat = {
       id: chatId,
       title: 'Новый чат',
@@ -412,7 +544,7 @@ const App = () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    
+
     setChats([newChat, ...chats]);
     setCurrentChatId(chatId);
     setMessages([]);
@@ -421,7 +553,7 @@ const App = () => {
 
   const deleteChat = async (chatId: string) => {
     if (!currentUser) return;
-    
+
     Alert.alert(
       'Удалить чат?',
       'Это действие нельзя отменить',
@@ -443,26 +575,23 @@ const App = () => {
   };
 
   // ============================================================
-  //  ФОТО — ИСПРАВЛЕННАЯ ВЕРСИЯ
+  //  ФОТО
   // ============================================================
   const pickImage = async () => {
     try {
-      // Запрашиваем разрешение
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
+
       if (status !== 'granted') {
         Alert.alert('⚠️', 'Нет доступа к галерее');
         return;
       }
 
-      // Открываем галерею
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaType.Images,
         quality: 0.5,
         allowsEditing: false,
       });
 
-      // Проверяем результат
       if (result.canceled) {
         console.log('📸 Пользователь отменил выбор');
         return;
@@ -475,16 +604,14 @@ const App = () => {
 
       const uri = result.assets[0].uri;
       console.log('📸 Фото выбрано:', uri);
-      
-      // Сохраняем и отправляем
+
       setImagePreview(uri);
       setSelectedImage(uri);
-      
-      // Автоотправка через 500ms
+
       setTimeout(() => {
         sendMessage();
       }, 500);
-      
+
     } catch (error) {
       console.error('❌ Ошибка выбора фото:', error);
       Alert.alert('Ошибка', 'Не удалось выбрать фото. Попробуйте ещё раз.');
@@ -505,8 +632,8 @@ const App = () => {
       return;
     }
 
-    const isPremium = currentUser?.role === 'ai_basic' || 
-                      currentUser?.role === 'ai_max' || 
+    const isPremium = currentUser?.role === 'ai_basic' ||
+                      currentUser?.role === 'ai_max' ||
                       currentUser?.role === 'nemesis';
 
     if (!isPremium) {
@@ -530,10 +657,12 @@ const App = () => {
       text += `[${time}] ${sender}:\n${msg.text}\n\n`;
     });
 
-    Alert.alert('✅ Экспорт', text, [
-      { text: 'Закрыть' },
-      { text: 'Копировать', onPress: () => console.log('Копировать:', text) }
-    ]);
+    try {
+      await Clipboard.setStringAsync(text);
+      Alert.alert('✅ Экспорт', 'Чат скопирован в буфер обмена');
+    } catch {
+      Alert.alert('✅ Экспорт', text);
+    }
   };
 
   // ============================================================
@@ -541,44 +670,44 @@ const App = () => {
   // ============================================================
   const activateKey = async () => {
     if (!currentUser || !activateKeyInput.trim()) return;
-    
+
     setIsActivating(true);
     try {
       const keyRef = ref(database, `keys/${activateKeyInput.trim()}`);
       const snapshot = await get(keyRef);
       const keyData = snapshot.val();
-      
+
       if (!keyData) {
         Alert.alert('Ошибка', 'Неверный ключ');
         setIsActivating(false);
         return;
       }
-      
+
       if (keyData.used) {
         Alert.alert('Ошибка', 'Ключ уже использован');
         setIsActivating(false);
         return;
       }
-      
+
       const currentRole = currentUser.role || 'free';
       let newRole = currentRole;
       const plan = keyData.plan;
-      
+
       if (plan === 'elite' && currentRole === 'ai_basic') newRole = 'ai_max';
       else if (plan === 'ai_basic' && currentRole === 'elite') newRole = 'ai_max';
       else if (plan === 'ai_max') newRole = 'ai_max';
       else newRole = plan;
-      
+
       await update(ref(database, `users/${currentUser.uid}`), {
         role: newRole
       });
-      
+
       await update(ref(database, `keys/${activateKeyInput.trim()}`), {
         used: true,
         usedBy: currentUser.uid,
         usedAt: Date.now()
       });
-      
+
       setCurrentUser({ ...currentUser, role: newRole });
       setActivateKeyInput('');
       setIsActivating(false);
@@ -619,9 +748,9 @@ const App = () => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, regEmail, regPassword);
       const user = userCredential.user;
-      
+
       await updateProfile(user, { displayName: regUsername });
-      
+
       await set(ref(database, `users/${user.uid}`), {
         username: regUsername,
         email: regEmail,
@@ -629,7 +758,7 @@ const App = () => {
         createdAt: Date.now(),
         subscription: { free: { active: true } }
       });
-      
+
       Alert.alert('✅ Успешно!', 'Аккаунт создан! Теперь войдите.');
       setShowRegister(false);
       setRegUsername('');
@@ -656,7 +785,70 @@ const App = () => {
   };
 
   // ============================================================
-  //  ОТПРАВКА СООБЩЕНИЯ (с режимами)
+  //  ОДИН СТРИМ-ЗАПРОС К AGNES (возвращает текст + finish_reason)
+  // ============================================================
+  const streamOnce = async (
+    reqMessages: { role: string; content: any }[],
+    maxTokens: number,
+    onChunk: (chunk: string) => void
+  ): Promise<{ text: string; finishReason: string | null }> => {
+    const response = await fetch(AGNES_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AGNES_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: AGNES_MODEL,
+        messages: reqMessages,
+        max_tokens: maxTokens,
+        temperature: 0.5,
+        stream: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const rawResponse = await response.text();
+      throw new Error(`HTTP ${response.status}: ${rawResponse}`);
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    if (!reader) throw new Error('Нет ответа от сервера');
+
+    let buffer = '';
+    let text = '';
+    let finishReason: string | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+        try {
+          const json = JSON.parse(data);
+          const choice = json.choices?.[0];
+          const chunk = choice?.delta?.content || '';
+          if (chunk) {
+            text += chunk;
+            onChunk(chunk);
+          }
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+        } catch (_) {}
+      }
+    }
+
+    return { text, finishReason };
+  };
+
+  // ============================================================
+  //  ОТПРАВКА СООБЩЕНИЯ (с режимами + авто-продолжение при обрыве)
   // ============================================================
   const sendMessage = async () => {
     if ((!inputText.trim() && !selectedImage) || isLoading || !currentUser || !currentChatId) return;
@@ -679,14 +871,6 @@ const App = () => {
       setIsUploading(false);
     }
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: text,
-      isUser: true,
-      timestamp: Date.now(),
-      imageUrl: imageUrl || undefined,
-    };
-
     const msgRef = push(ref(database, `users/${currentUser.uid}/ai_chats/${currentChatId}/messages`));
     await set(msgRef, {
       role: 'user',
@@ -694,7 +878,7 @@ const App = () => {
       timestamp: Date.now(),
       imageUrl: imageUrl || null,
     });
-    
+
     await update(ref(database, `users/${currentUser.uid}/ai_chats/${currentChatId}`), {
       updated_at: Date.now()
     });
@@ -702,8 +886,6 @@ const App = () => {
     removeImage();
 
     try {
-      const roleConfig = ROLE_CONFIG[currentUser.role] || ROLE_CONFIG.free;
-      
       const lowerMsg = text.toLowerCase();
       if (lowerMsg.includes('вирус') || lowerMsg.includes('вредонос') || lowerMsg.includes('эксплойт')) {
         const warning = '⚠️ Мой создатель, Китикат, против создания вирусов. Я не могу помочь с этим.';
@@ -713,24 +895,13 @@ const App = () => {
         return;
       }
 
-      // ============================================================
-      //  ДОБАВЛЯЕМ ПРОМПТ В ЗАВИСИМОСТИ ОТ РЕЖИМА
-      // ============================================================
       let modePrompt = '';
       switch (currentMode) {
-        case 'reasoning':
-          modePrompt = REASONING_PROMPT;
-          break;
-        case 'search':
-          modePrompt = SEARCH_PROMPT;
-          break;
-        default:
-          modePrompt = '';
+        case 'reasoning': modePrompt = REASONING_PROMPT; break;
+        case 'search': modePrompt = SEARCH_PROMPT; break;
+        default: modePrompt = '';
       }
-
-      // Системный промпт + режимный (дополняет, не перебивает)
       const fullSystemPrompt = SYSTEM_PROMPT + (modePrompt ? '\n\n' + modePrompt : '');
-
       const maxTokens = getMaxTokensForRole(currentUser.role);
 
       const history = messages.map(m => ({
@@ -746,88 +917,44 @@ const App = () => {
         ];
       }
 
-      const systemPrompt = {
-        role: 'system',
-        content: fullSystemPrompt
-      };
+      const baseMessages = [...history, { role: 'user', content: userContent }];
 
-      const requestBody = {
-        model: AGNES_MODEL,
-        messages: [
-          systemPrompt,
-          ...history,
-          {
-            role: 'user',
-            content: userContent,
-          }
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.7,
-        stream: true,
-      };
-
-      const response = await fetch(AGNES_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${AGNES_API_KEY}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const rawResponse = await response.text();
-        throw new Error(`HTTP ${response.status}: ${rawResponse}`);
-      }
-
-      // Обработка стриминга
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let fullResponse = '';
-
-      if (!reader) {
-        throw new Error('Нет ответа от сервера');
-      }
-
-      // Создаём сообщение ассистента
+      // Создаём сообщение ассистента сразу, дальше просто обновляем content
       const resRef = push(ref(database, `users/${currentUser.uid}/ai_chats/${currentChatId}/messages`));
-      await set(resRef, {
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-      });
+      await set(resRef, { role: 'assistant', content: '', timestamp: Date.now() });
 
-      let buffer = '';
+      let fullResponse = '';
+      let convo = [{ role: 'system', content: fullSystemPrompt }, ...baseMessages];
+      let attempt = 0;
+      const MAX_CONTINUATIONS = 3;
+
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        const { text: chunkText, finishReason } = await streamOnce(convo, maxTokens, async (chunk) => {
+          fullResponse += chunk;
+          await update(ref(database, `users/${currentUser.uid}/ai_chats/${currentChatId}/messages/${resRef.key}`), {
+            content: fullResponse,
+          });
+        });
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
-          if (data === '[DONE]') continue;
-          try {
-            const json = JSON.parse(data);
-            const chunk = json.choices?.[0]?.delta?.content || '';
-            if (chunk) {
-              fullResponse += chunk;
-              // Обновляем сообщение в Firebase
-              await update(ref(database, `users/${currentUser.uid}/ai_chats/${currentChatId}/messages/${resRef.key}`), {
-                content: fullResponse,
-              });
-            }
-          } catch (_) {}
-        }
+        // fullResponse уже накоплен построчно в onChunk — chunkText тут не нужен отдельно
+        void chunkText;
+
+        if (finishReason !== 'length' || attempt >= MAX_CONTINUATIONS) break;
+
+        attempt++;
+        convo = [
+          { role: 'system', content: fullSystemPrompt },
+          ...baseMessages,
+          { role: 'assistant', content: fullResponse },
+          { role: 'user', content: 'Продолжи ответ ровно с того места, где остановился. Не повторяй уже написанное и обязательно закрой любой незакрытый блок кода.' },
+        ];
       }
 
     } catch (error: any) {
       console.error('❌ Ошибка:', error);
-      
+
       let userMessage = '⚠️ Не удалось получить ответ от сервера. Попробуйте позже.';
-      
+
       const errMsg = error.message || '';
       if (errMsg.includes('500') || errMsg.includes('InternalServerError')) {
         userMessage = '⚠️ Сервер временно перегружен. Пожалуйста, подождите пару минут и попробуйте снова. 🙏';
@@ -840,12 +967,12 @@ const App = () => {
       } else if (errMsg.includes('timeout')) {
         userMessage = '⚠️ Время ожидания истекло. Сервер отвечает слишком долго. ⏰';
       }
-      
+
       const resRef = push(ref(database, `users/${currentUser.uid}/ai_chats/${currentChatId}/messages`));
-      await set(resRef, { 
-        role: 'assistant', 
-        content: userMessage, 
-        timestamp: Date.now() 
+      await set(resRef, {
+        role: 'assistant',
+        content: userMessage,
+        timestamp: Date.now()
       });
     } finally {
       setIsLoading(false);
@@ -868,6 +995,7 @@ const App = () => {
     header: { backgroundColor: 'rgba(7,7,13,0.95)' },
     border: { borderColor: 'rgba(255,255,255,0.05)' },
     statusBar: '#07070d',
+    codeBg: '#000000c0',
   } : {
     container: { backgroundColor: '#f5f5f5' },
     text: { color: '#1a1a1a' },
@@ -881,6 +1009,52 @@ const App = () => {
     header: { backgroundColor: 'rgba(255,255,255,0.95)' },
     border: { borderColor: 'rgba(0,0,0,0.05)' },
     statusBar: '#f5f5f5',
+    codeBg: '#00000010',
+  };
+
+  // ============================================================
+  //  РЕНДЕР ОДНОГО СООБЩЕНИЯ (текст + код-блоки)
+  // ============================================================
+  const renderMessageBody = (msg: Message) => {
+    const parts = parseMessageParts(msg.text);
+    return parts.map((part, i) => {
+      if (part.type === 'text') {
+        if (!part.content.trim()) return null;
+        return (
+          <Text key={i} style={[msg.isUser ? styles.userText : styles.aiText, theme.text, { fontSize: fontSize }]}>
+            {part.content}
+          </Text>
+        );
+      }
+      const isHtml = HTML_LANGS.includes(part.lang.toLowerCase());
+      return (
+        <View key={i} style={[styles.codeBlock, { backgroundColor: theme.codeBg }, !part.complete && styles.codeBlockPending]}>
+          <View style={styles.codeBlockHeader}>
+            <Text style={styles.codeBlockLang}>{part.lang.toUpperCase()}</Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {part.complete && isHtml && (
+                <TouchableOpacity onPress={() => setPreviewHtml(wrapHtmlForPreview(part.content))}>
+                  <Text style={styles.codeBlockAction}>▶ Просмотр</Text>
+                </TouchableOpacity>
+              )}
+              {part.complete ? (
+                <TouchableOpacity onPress={async () => {
+                  await Clipboard.setStringAsync(part.content);
+                  Alert.alert('✅', 'Код скопирован');
+                }}>
+                  <Text style={styles.codeBlockAction}>📋 Копировать</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.codeBlockTyping}>печатает…</Text>
+              )}
+            </View>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <Text style={styles.codeBlockText}>{part.content}</Text>
+          </ScrollView>
+        </View>
+      );
+    });
   };
 
   // ============================================================
@@ -904,7 +1078,14 @@ const App = () => {
       <SafeAreaProvider>
         <SafeAreaView style={[styles.container, theme.container]}>
           <View style={styles.authContainer}>
-            <Text style={[styles.authTitle, theme.text]}>🤖 Nemesis AI</Text>
+            <LinearGradient
+              colors={['#6c63ff', '#a78bfa', '#ffd700']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={styles.authIconRing}
+            >
+              <Text style={styles.authIconText}>N</Text>
+            </LinearGradient>
+            <Text style={[styles.authTitle, theme.text]}>Nemesis AI</Text>
             <Text style={[styles.authSubtitle, theme.textSecondary]}>Создан командой Kotik Team</Text>
 
             {!showRegister ? (
@@ -927,8 +1108,10 @@ const App = () => {
                   onChangeText={setLoginPassword}
                   secureTextEntry
                 />
-                <TouchableOpacity style={styles.authButton} onPress={handleLogin}>
-                  <Text style={styles.authButtonText}>Войти</Text>
+                <TouchableOpacity onPress={handleLogin}>
+                  <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.authButton}>
+                    <Text style={styles.authButtonText}>Войти</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setShowRegister(true)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Нет аккаунта? Зарегистрироваться</Text>
@@ -961,8 +1144,10 @@ const App = () => {
                   onChangeText={setRegPassword}
                   secureTextEntry
                 />
-                <TouchableOpacity style={styles.authButton} onPress={handleRegister}>
-                  <Text style={styles.authButtonText}>Зарегистрироваться</Text>
+                <TouchableOpacity onPress={handleRegister}>
+                  <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.authButton}>
+                    <Text style={styles.authButtonText}>Зарегистрироваться</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setShowRegister(false)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Уже есть аккаунт? Войти</Text>
@@ -979,22 +1164,25 @@ const App = () => {
     <SafeAreaProvider>
       <SafeAreaView style={[styles.container, theme.container]}>
         <StatusBar barStyle={isDarkTheme ? 'light-content' : 'dark-content'} backgroundColor={theme.statusBar} />
-        
-        {/* Верхняя панель с режимами */}
+
+        {/* Верхняя панель с вкладками */}
         <View style={[styles.header, theme.header]}>
-          <TouchableOpacity 
+          <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.headerIcon}>
+            <Text style={styles.headerIconText}>N</Text>
+          </LinearGradient>
+          <TouchableOpacity
             style={[styles.tabButton, activeTab === 'chats' && styles.tabButtonActive]}
             onPress={() => setActiveTab('chats')}
           >
             <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive, theme.text]}>💬 Чаты</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.tabButton, activeTab === 'profile' && styles.tabButtonActive]}
             onPress={() => setActiveTab('profile')}
           >
             <Text style={[styles.tabText, activeTab === 'profile' && styles.tabTextActive, theme.text]}>👤 Профиль</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.tabButton, activeTab === 'settings' && styles.tabButtonActive]}
             onPress={() => setActiveTab('settings')}
           >
@@ -1004,19 +1192,19 @@ const App = () => {
 
         {/* Панель режимов */}
         <View style={[styles.modeBar, theme.border]}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.modeButton, currentMode === 'standard' && styles.modeButtonActive]}
             onPress={() => setCurrentMode('standard')}
           >
             <Text style={[styles.modeButtonText, currentMode === 'standard' && styles.modeButtonTextActive, theme.text]}>💬 Стандартный</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.modeButton, currentMode === 'reasoning' && styles.modeButtonActive]}
             onPress={() => setCurrentMode('reasoning')}
           >
             <Text style={[styles.modeButtonText, currentMode === 'reasoning' && styles.modeButtonTextActive, theme.text]}>🧠 Рассуждение</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.modeButton, currentMode === 'search' && styles.modeButtonActive]}
             onPress={() => setCurrentMode('search')}
           >
@@ -1041,7 +1229,7 @@ const App = () => {
                     </TouchableOpacity>
                   </View>
                 </View>
-                
+
                 <View style={{ flex: 1 }}>
                   <ScrollView
                     ref={scrollViewRef}
@@ -1054,36 +1242,34 @@ const App = () => {
                     {messages.map((msg) => {
                       const isUser = msg.isUser;
                       return (
-                        <View key={msg.id} style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}>
-                          <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.aiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
-                            {!isUser && <Text style={[styles.aiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
-                            
-                            {msg.imageUrl && (
-                              <Image 
-                                source={{ uri: msg.imageUrl }} 
-                                style={styles.messageImage}
-                                resizeMode="cover"
-                              />
-                            )}
-                            
-                            {msg.text && msg.text !== '📸 Фото' && (
-                              <Text style={[isUser ? styles.userText : styles.aiText, theme.text, { fontSize: fontSize }]}>
-                                {msg.text}
+                        <FadeInMessage key={msg.id}>
+                          <View style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}>
+                            <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.aiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
+                              {!isUser && <Text style={[styles.aiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
+
+                              {msg.imageUrl && (
+                                <Image
+                                  source={{ uri: msg.imageUrl }}
+                                  style={styles.messageImage}
+                                  resizeMode="cover"
+                                />
+                              )}
+
+                              {msg.text && msg.text !== '📸 Фото' && renderMessageBody(msg)}
+
+                              <Text style={[styles.timestamp, theme.textSecondary]}>
+                                {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                               </Text>
-                            )}
-                            
-                            <Text style={[styles.timestamp, theme.textSecondary]}>
-                              {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                            </Text>
+                            </View>
                           </View>
-                        </View>
+                        </FadeInMessage>
                       );
                     })}
                     {isLoading && (
                       <View style={[styles.messageWrapper, styles.aiMessageWrapper]}>
-                        <View style={[styles.messageBubble, styles.aiBubble, theme.aiBubble]}>
-                          <ActivityIndicator size="small" color="#6c63ff" />
-                          <Text style={[styles.loadingText, theme.textSecondary]}>Думаю...</Text>
+                        <View style={[styles.messageBubble, styles.aiBubble, theme.aiBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                          <TypingDots />
+                          <Text style={[styles.loadingText, theme.textSecondary, { marginTop: 0 }]}>Думаю...</Text>
                         </View>
                       </View>
                     )}
@@ -1097,7 +1283,7 @@ const App = () => {
                     )}
                   </ScrollView>
                 </View>
-                
+
                 <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={100}>
                   <View style={[styles.inputContainer, theme.inputContainer]}>
                     {imagePreview && (
@@ -1109,7 +1295,7 @@ const App = () => {
                       </View>
                     )}
                     <View style={styles.inputRow}>
-                      <TouchableOpacity style={[styles.attachButton, theme.attachButton]} onPress={pickImage}>
+                      <TouchableOpacity style={styles.attachButton} onPress={pickImage}>
                         <Text style={[styles.attachButtonText, theme.text]}>📎</Text>
                       </TouchableOpacity>
                       <TextInput
@@ -1123,11 +1309,16 @@ const App = () => {
                         editable={!isLoading && !isUploading}
                       />
                       <TouchableOpacity
-                        style={[styles.sendButton, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.sendButtonDisabled : null]}
                         onPress={sendMessage}
                         disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
                       >
-                        <Text style={styles.sendButtonText}>📤</Text>
+                        <LinearGradient
+                          colors={['#6c63ff', '#a78bfa']}
+                          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                          style={[styles.sendButton, ((!inputText.trim() && !imagePreview) || isLoading || isUploading) && styles.sendButtonDisabled]}
+                        >
+                          <Text style={styles.sendButtonText}>📤</Text>
+                        </LinearGradient>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1136,12 +1327,14 @@ const App = () => {
             ) : (
               <View style={styles.noChatsContainer}>
                 <Text style={[styles.noChatsText, theme.textSecondary]}>🤖 Нет чатов</Text>
-                <TouchableOpacity style={styles.createFirstChatButton} onPress={createNewChat}>
-                  <Text style={styles.createFirstChatButtonText}>➕ Создать первый чат</Text>
+                <TouchableOpacity onPress={createNewChat}>
+                  <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.createFirstChatButton}>
+                    <Text style={styles.createFirstChatButtonText}>➕ Создать первый чат</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
               </View>
             )}
-            
+
             {chats.length > 0 && (
               <View style={[styles.chatListContainer, theme.border]}>
                 <FlatList
@@ -1154,7 +1347,7 @@ const App = () => {
                       style={[
                         styles.chatListItem,
                         currentChatId === item.id && styles.chatListItemActive,
-                        { backgroundColor: currentChatId === item.id ? 'rgba(108,99,255,0.12)' : 'rgba(255,255,255,0.03)', borderColor: currentChatId === item.id ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)' }
+                        { backgroundColor: currentChatId === item.id ? 'rgba(108,99,255,0.14)' : 'rgba(255,255,255,0.03)', borderColor: currentChatId === item.id ? '#6c63ff' : 'rgba(255,255,255,0.04)' }
                       ]}
                       onPress={() => {
                         setCurrentChatId(item.id);
@@ -1170,11 +1363,10 @@ const App = () => {
                     </TouchableOpacity>
                   )}
                 />
-                <TouchableOpacity 
-                  style={styles.createChatListButton}
-                  onPress={createNewChat}
-                >
-                  <Text style={styles.createChatListButtonText}>➕</Text>
+                <TouchableOpacity onPress={createNewChat}>
+                  <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.createChatListButton}>
+                    <Text style={styles.createChatListButtonText}>➕</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
               </View>
             )}
@@ -1209,25 +1401,25 @@ const App = () => {
                 <Text style={[styles.profileInfoLabel, theme.text]}>🌐 Язык</Text>
                 <Text style={[styles.profileInfoValue, theme.textSecondary]}>Русский 🇷🇺</Text>
               </View>
-              
+
               <View style={[styles.profileDivider, theme.border]} />
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={[styles.profileButton, theme.card]}
                 onPress={() => setShowSettings(true)}
               >
                 <Text style={[styles.profileButtonText, theme.text, { fontSize: fontSize }]}>🔑 Активировать ключ</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={[styles.profileButton, { borderColor: '#ff4455', marginTop: 8 }]}
                 onPress={() => Alert.alert(
                   '🗑️ Удалить аккаунт',
                   'Вы уверены? Это действие нельзя отменить. Все данные будут потеряны.',
                   [
                     { text: 'Отмена', style: 'cancel' },
-                    { 
-                      text: 'Удалить', 
+                    {
+                      text: 'Удалить',
                       style: 'destructive',
                       onPress: async () => {
                         try {
@@ -1251,7 +1443,7 @@ const App = () => {
                 <Text style={[styles.profileButtonText, { color: '#ff4455', fontSize: fontSize }]}>🗑️ Удалить аккаунт</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.profileButton, styles.profileButtonLogout, theme.card, { marginTop: 8 }]}
                 onPress={handleLogout}
               >
@@ -1263,7 +1455,7 @@ const App = () => {
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
             <View style={[styles.settingsCard, theme.card]}>
               <Text style={[styles.settingsTitle, theme.text, { fontSize: fontSize + 4 }]}>⚙️ Настройки</Text>
-              
+
               <View style={[styles.settingsItem, theme.border]}>
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🌙 Тёмная тема</Text>
                 <Switch
@@ -1273,11 +1465,11 @@ const App = () => {
                   thumbColor={isDarkTheme ? '#fff' : '#f4f3f4'}
                 />
               </View>
-              
+
               <View style={[styles.settingsItem, theme.border]}>
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📐 Размер текста</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     onPress={() => {
                       const newSize = Math.max(12, fontSize - 2);
                       setFontSize(newSize);
@@ -1290,7 +1482,7 @@ const App = () => {
                   <Text style={[styles.settingsItemStatus, theme.textSecondary, { marginHorizontal: 12, fontSize: fontSize }]}>
                     {fontSize}
                   </Text>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     onPress={() => {
                       const newSize = Math.min(24, fontSize + 2);
                       setFontSize(newSize);
@@ -1303,10 +1495,10 @@ const App = () => {
                 </View>
               </View>
 
-              {(currentUser?.role === 'ai_basic' || 
-                currentUser?.role === 'ai_max' || 
+              {(currentUser?.role === 'ai_basic' ||
+                currentUser?.role === 'ai_max' ||
                 currentUser?.role === 'nemesis') && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.settingsItem, theme.border, { paddingVertical: 14 }]}
                   onPress={exportChat}
                 >
@@ -1314,17 +1506,17 @@ const App = () => {
                   <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>→</Text>
                 </TouchableOpacity>
               )}
-              
+
               <View style={[styles.settingsItem, theme.border]}>
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>ℹ️ О приложении</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>v2.0.0</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>v2.1.0</Text>
               </View>
 
               <View style={[styles.settingsItem, theme.border]}>
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>👥 Команда</Text>
                 <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>Kotik Team</Text>
               </View>
-              
+
               <View style={[styles.settingsItem, theme.border]}>
                 <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📧 Поддержка</Text>
                 <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>@Nemesissup</Text>
@@ -1343,7 +1535,7 @@ const App = () => {
             <View style={[styles.modalContent, theme.card]}>
               <Text style={[styles.modalTitle, theme.text, { fontSize: fontSize + 4 }]}>🔑 Активировать ключ</Text>
               <Text style={[styles.modalSubtitle, theme.textSecondary, { fontSize: fontSize }]}>Введите ключ подписки</Text>
-              
+
               <TextInput
                 style={[styles.modalInput, theme.input, { fontSize: fontSize }]}
                 placeholder="Введите ключ..."
@@ -1352,18 +1544,16 @@ const App = () => {
                 onChangeText={setActivateKeyInput}
                 autoCapitalize="characters"
               />
-              
-              <TouchableOpacity 
-                style={styles.modalButton}
-                onPress={activateKey}
-                disabled={isActivating}
-              >
-                <Text style={[styles.modalButtonText, { fontSize: fontSize }]}>
-                  {isActivating ? '⏳ Активация...' : '✅ Активировать'}
-                </Text>
+
+              <TouchableOpacity onPress={activateKey} disabled={isActivating}>
+                <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modalButton}>
+                  <Text style={[styles.modalButtonText, { fontSize: fontSize }]}>
+                    {isActivating ? '⏳ Активация...' : '✅ Активировать'}
+                  </Text>
+                </LinearGradient>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={() => setShowSettings(false)}
               >
@@ -1371,6 +1561,26 @@ const App = () => {
               </TouchableOpacity>
             </View>
           </View>
+        </Modal>
+
+        {/* Превью HTML-кода — аналог кнопки "Запустить" на сайте */}
+        <Modal
+          visible={!!previewHtml}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => setPreviewHtml(null)}
+        >
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#0d0d1a' }}>
+            <View style={styles.previewHeader}>
+              <Text style={styles.previewHeaderTitle}>▶ Просмотр</Text>
+              <TouchableOpacity onPress={() => setPreviewHtml(null)} style={styles.previewCloseBtn}>
+                <Text style={{ color: '#fff', fontSize: 18 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            {previewHtml && (
+              <WebView originWhitelist={['*']} source={{ html: previewHtml }} style={{ flex: 1, backgroundColor: '#fff' }} />
+            )}
+          </SafeAreaView>
         </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
@@ -1384,23 +1594,26 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: 10, fontSize: 16 },
-  
-  authContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 30 },
-  authTitle: { fontSize: 36, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
+
+  authContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 30, alignItems: 'center' },
+  authIconRing: { width: 64, height: 64, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
+  authIconText: { fontSize: 28, fontWeight: '800', color: '#fff' },
+  authTitle: { fontSize: 30, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
   authSubtitle: { fontSize: 14, textAlign: 'center', marginBottom: 30 },
-  authForm: { borderRadius: 20, padding: 24, borderWidth: 1 },
+  authForm: { borderRadius: 20, padding: 24, borderWidth: 1, width: '100%' },
   authFormTitle: { fontSize: 20, fontWeight: '600', textAlign: 'center', marginBottom: 20 },
   authInput: { borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 12, borderWidth: 1 },
-  authButton: { backgroundColor: '#6c63ff', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
+  authButton: { borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
   authButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
+
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, gap: 8 },
+  headerIcon: { width: 30, height: 30, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 4 },
+  headerIconText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   tabButton: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   tabButtonActive: { backgroundColor: 'rgba(108,99,255,0.15)' },
   tabText: { fontSize: 13, fontWeight: '500' },
   tabTextActive: { color: '#6c63ff', fontWeight: '600' },
-  
-  // ===== РЕЖИМЫ =====
+
   modeBar: {
     flexDirection: 'row',
     paddingHorizontal: 12,
@@ -1429,18 +1642,18 @@ const styles = StyleSheet.create({
   chatContainer: { flex: 1 },
   noChatsContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   noChatsText: { fontSize: 18, marginBottom: 20 },
-  createFirstChatButton: { backgroundColor: '#6c63ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  createFirstChatButton: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
   createFirstChatButtonText: { color: '#fff', fontWeight: '600' },
-  
+
   chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
   chatTitle: { fontSize: 16, fontWeight: '600' },
   chatHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   createChatHeaderText: { fontSize: 20 },
   deleteChatButtonText: { fontSize: 18 },
-  
+
   messagesContainer: { flex: 1 },
   messagesContent: { paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 20 },
-  
+
   messageWrapper: { marginBottom: 12, maxWidth: '85%' },
   userMessageWrapper: { alignSelf: 'flex-end' },
   aiMessageWrapper: { alignSelf: 'flex-start' },
@@ -1452,25 +1665,33 @@ const styles = StyleSheet.create({
   aiText: { fontSize: 15, lineHeight: 22 },
   messageImage: { width: 200, height: 200, borderRadius: 10, marginBottom: 8, resizeMode: 'cover' },
   timestamp: { fontSize: 9, marginTop: 4, textAlign: 'right' },
-  
+
+  codeBlock: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(108,99,255,0.15)', marginVertical: 6, overflow: 'hidden' },
+  codeBlockPending: { borderColor: 'rgba(108,99,255,0.4)' },
+  codeBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(255,255,255,0.04)' },
+  codeBlockLang: { color: '#6c63ff', fontSize: 10, fontWeight: '700' },
+  codeBlockAction: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  codeBlockTyping: { color: '#8888aa', fontSize: 11 },
+  codeBlockText: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, color: '#e0e0e0', padding: 10 },
+
   inputContainer: { padding: 12, borderTopWidth: 1 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
   attachButton: { padding: 12, borderRadius: 12, marginRight: 8, borderWidth: 1 },
   attachButtonText: { fontSize: 18 },
   input: { flex: 1, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, maxHeight: 100, fontSize: 15, borderWidth: 1 },
-  sendButton: { backgroundColor: 'rgba(108,99,255,0.15)', padding: 12, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(108,99,255,0.15)' },
+  sendButton: { padding: 12, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   sendButtonDisabled: { opacity: 0.3 },
   sendButtonText: { fontSize: 20 },
-  
+
   imagePreviewContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   imagePreview: { width: 60, height: 60, borderRadius: 8 },
   removeImageButton: { position: 'absolute', top: -6, right: -6, backgroundColor: 'rgba(255,0,0,0.8)', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
   removeImageText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  
-  chatListContainer: { 
-    maxHeight: 70, 
-    borderTopWidth: 1, 
-    paddingVertical: 8, 
+
+  chatListContainer: {
+    maxHeight: 70,
+    borderTopWidth: 1,
+    paddingVertical: 8,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1480,16 +1701,13 @@ const styles = StyleSheet.create({
   chatListItemText: { fontSize: 12, marginRight: 6 },
   chatListItemCount: { fontSize: 10 },
   createChatListButton: {
-    backgroundColor: 'rgba(108,99,255,0.15)',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
     marginLeft: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(108,99,255,0.2)',
   },
-  createChatListButtonText: { fontSize: 16, color: '#6c63ff' },
-  
+  createChatListButtonText: { fontSize: 16, color: '#fff' },
+
   profileCard: { borderRadius: 20, padding: 24, borderWidth: 1 },
   profileTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
   profileEmail: { fontSize: 14, marginBottom: 16 },
@@ -1503,22 +1721,26 @@ const styles = StyleSheet.create({
   profileButtonText: { fontSize: 14 },
   profileButtonLogout: { borderColor: 'rgba(255,68,68,0.08)' },
   profileButtonTextLogout: { color: '#ff4455' },
-  
+
   settingsCard: { borderRadius: 20, padding: 24, borderWidth: 1 },
   settingsTitle: { fontSize: 20, fontWeight: '600', marginBottom: 16 },
   settingsItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
   settingsItemLabel: { fontSize: 15 },
   settingsItemStatus: { fontSize: 14 },
-  
+
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { borderRadius: 24, padding: 32, width: '85%', maxWidth: 400, borderWidth: 1 },
   modalTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
   modalSubtitle: { fontSize: 14, textAlign: 'center', marginBottom: 24 },
   modalInput: { borderRadius: 12, padding: 14, fontSize: 16, marginBottom: 16, borderWidth: 1, textAlign: 'center', letterSpacing: 1 },
-  modalButton: { backgroundColor: '#6c63ff', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
+  modalButton: { borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
   modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   modalCloseButton: { alignItems: 'center', padding: 12 },
   modalCloseButtonText: { fontSize: 14 },
+
+  previewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  previewHeaderTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  previewCloseBtn: { padding: 6 },
 });
 
 export default App;
