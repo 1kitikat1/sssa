@@ -87,21 +87,6 @@ const SYSTEM_PROMPT = `
 `;
 
 // ============================================================
-//  ПРОМПТЫ ДЛЯ РЕЖИМОВ
-// ============================================================
-const REASONING_PROMPT = `
-Перед ответом ты ДОЛЖЕН показать свои рассуждения в блоке \`\`\`thinking ... \`\`\`.
-1. Сначала напиши "Рассуждение:" и опиши ход мыслей.
-2. Затем напиши "Ответ:" и дай финальный ответ.
-`;
-
-const SEARCH_PROMPT = `
-Если вопрос требует актуальной информации, ты ДОЛЖЕН использовать свои знания.
-Если ты не знаешь точного ответа — скажи это честно.
-Всегда указывай источники, если они есть.
-`;
-
-// ============================================================
 //  ТИПЫ
 // ============================================================
 type Message = {
@@ -174,6 +159,30 @@ const uploadImage = async (uri: string): Promise<string> => {
 };
 
 // ============================================================
+//  ПАРСИНГ КОДА
+// ============================================================
+const parseCodeBlocks = (text: string) => {
+  const parts: { type: 'text' | 'code'; content: string; lang?: string }[] = [];
+  const regex = /```(\w+)?\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', content: text.slice(lastIndex, match.index) });
+    }
+    parts.push({ type: 'code', lang: match[1] || 'plaintext', content: match[2] });
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', content: text.slice(lastIndex) });
+  }
+
+  return parts;
+};
+
+// ============================================================
 //  ОСНОВНОЙ КОМПОНЕНТ
 // ============================================================
 const App = () => {
@@ -203,11 +212,9 @@ const App = () => {
 
   const [showRegister, setShowRegister] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chats' | 'profile' | 'settings'>('chats');
+  const [showSidebar, setShowSidebar] = useState(true);
   const [activateKeyInput, setActivateKeyInput] = useState('');
   const [isActivating, setIsActivating] = useState(false);
-
-  const [currentMode, setCurrentMode] = useState<Mode>('standard');
 
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -414,7 +421,6 @@ const App = () => {
     setChats([newChat, ...chats]);
     setCurrentChatId(chatId);
     setMessages([]);
-    setActiveTab('chats');
   };
 
   const deleteChat = async (chatId: string) => {
@@ -761,13 +767,7 @@ const App = () => {
         return;
       }
 
-      let modePrompt = '';
-      switch (currentMode) {
-        case 'reasoning': modePrompt = REASONING_PROMPT; break;
-        case 'search': modePrompt = SEARCH_PROMPT; break;
-        default: modePrompt = '';
-      }
-      const fullSystemPrompt = SYSTEM_PROMPT + (modePrompt ? '\n\n' + modePrompt : '');
+      const fullSystemPrompt = SYSTEM_PROMPT;
       const maxTokens = getMaxTokensForRole(currentUser.role);
 
       const history = messages.map(m => ({
@@ -812,6 +812,12 @@ const App = () => {
         ];
       }
 
+      if (!fullResponse || !fullResponse.trim()) {
+        await update(ref(database, `users/${currentUser.uid}/ai_chats/${currentChatId}/messages/${resRef.key}`), {
+          content: '⚠️ Не удалось получить ответ. Попробуйте позже.',
+        });
+      }
+
     } catch (error: any) {
       console.error('❌ Ошибка:', error);
 
@@ -842,27 +848,40 @@ const App = () => {
   };
 
   // ============================================================
-  //  ПАРСИНГ КОДА
+  //  РЕНДЕР СООБЩЕНИЯ
   // ============================================================
-  const parseCodeBlocks = (text: string) => {
-    const parts: { type: 'text' | 'code'; content: string; lang?: string }[] = [];
-    const regex = /```(\w+)?\n([\s\S]*?)```/g;
-    let lastIndex = 0;
-    let match;
+  const renderMessageContent = (msg: Message) => {
+    const parts = parseCodeBlocks(msg.text);
 
-    while ((match = regex.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        parts.push({ type: 'text', content: text.slice(lastIndex, match.index) });
+    return parts.map((part, index) => {
+      if (part.type === 'text') {
+        if (!part.content.trim()) return null;
+        return (
+          <Text key={index} style={[msg.isUser ? styles.userText : styles.aiText, { fontSize }]}>
+            {part.content}
+          </Text>
+        );
       }
-      parts.push({ type: 'code', lang: match[1] || 'plaintext', content: match[2] });
-      lastIndex = regex.lastIndex;
-    }
 
-    if (lastIndex < text.length) {
-      parts.push({ type: 'text', content: text.slice(lastIndex) });
-    }
-
-    return parts;
+      return (
+        <View key={index} style={styles.codeBlock}>
+          <View style={styles.codeBlockHeader}>
+            <Text style={styles.codeBlockLang}>{part.lang?.toUpperCase() || 'CODE'}</Text>
+            <TouchableOpacity
+              onPress={async () => {
+                await Clipboard.setStringAsync(part.content);
+                Alert.alert('✅', 'Код скопирован');
+              }}
+            >
+              <Text style={styles.codeBlockAction}>📋 Копировать</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <Text style={styles.codeBlockText}>{part.content}</Text>
+          </ScrollView>
+        </View>
+      );
+    });
   };
 
   // ============================================================
@@ -882,6 +901,7 @@ const App = () => {
     border: { borderColor: 'rgba(255,255,255,0.05)' },
     statusBar: '#07070d',
     codeBg: '#1a1a2e',
+    sidebarBg: 'rgba(255,255,255,0.02)',
   } : {
     container: { backgroundColor: '#f5f5f5' },
     text: { color: '#1a1a1a' },
@@ -896,43 +916,7 @@ const App = () => {
     border: { borderColor: 'rgba(0,0,0,0.05)' },
     statusBar: '#f5f5f5',
     codeBg: '#e8e8e8',
-  };
-
-  // ============================================================
-  //  РЕНДЕР СООБЩЕНИЯ
-  // ============================================================
-  const renderMessageContent = (msg: Message) => {
-    const parts = parseCodeBlocks(msg.text);
-
-    return parts.map((part, index) => {
-      if (part.type === 'text') {
-        if (!part.content.trim()) return null;
-        return (
-          <Text key={index} style={[msg.isUser ? styles.userText : styles.aiText, theme.text, { fontSize }]}>
-            {part.content}
-          </Text>
-        );
-      }
-
-      return (
-        <View key={index} style={[styles.codeBlock, { backgroundColor: theme.codeBg }]}>
-          <View style={styles.codeBlockHeader}>
-            <Text style={styles.codeBlockLang}>{part.lang?.toUpperCase() || 'CODE'}</Text>
-            <TouchableOpacity
-              onPress={async () => {
-                await Clipboard.setStringAsync(part.content);
-                Alert.alert('✅', 'Код скопирован');
-              }}
-            >
-              <Text style={styles.codeBlockAction}>📋 Копировать</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <Text style={styles.codeBlockText}>{part.content}</Text>
-          </ScrollView>
-        </View>
-      );
-    });
+    sidebarBg: 'rgba(0,0,0,0.02)',
   };
 
   // ============================================================
@@ -956,6 +940,9 @@ const App = () => {
       <SafeAreaProvider>
         <SafeAreaView style={[styles.container, theme.container]}>
           <View style={styles.authContainer}>
+            <View style={styles.authLogo}>
+              <Text style={styles.authLogoText}>N</Text>
+            </View>
             <Text style={[styles.authTitle, theme.text]}>🤖 Nemesis AI</Text>
             <Text style={[styles.authSubtitle, theme.textSecondary]}>Создан командой Kotik Team</Text>
 
@@ -1032,134 +1019,146 @@ const App = () => {
       <SafeAreaView style={[styles.container, theme.container]}>
         <StatusBar barStyle={isDarkTheme ? 'light-content' : 'dark-content'} backgroundColor={theme.statusBar} />
 
-        <View style={[styles.header, theme.header]}>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'chats' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('chats')}
-          >
-            <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive, theme.text]}>💬 Чаты</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'profile' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('profile')}
-          >
-            <Text style={[styles.tabText, activeTab === 'profile' && styles.tabTextActive, theme.text]}>👤 Профиль</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'settings' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('settings')}
-          >
-            <Text style={[styles.tabText, activeTab === 'settings' && styles.tabTextActive, theme.text]}>⚙️ Настройки</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={styles.mainLayout}>
+          {/* САЙДБАР — как на сайте */}
+          <View style={[styles.sidebar, { backgroundColor: theme.sidebarBg, borderColor: theme.border.borderColor }]}>
+            {/* Профиль */}
+            <View style={styles.sidebarProfile}>
+              <View style={styles.sidebarAvatar}>
+                <Text style={styles.sidebarAvatarText}>
+                  {currentUser?.username?.[0]?.toUpperCase() || 'U'}
+                </Text>
+              </View>
+              <View style={styles.sidebarProfileInfo}>
+                <Text style={[styles.sidebarName, theme.text]} numberOfLines={1}>
+                  {currentUser?.username || 'Пользователь'}
+                </Text>
+                <Text style={[styles.sidebarRole, styles[`role_${currentUser?.role || 'free'}`]]}>
+                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || '🆓 FREE'}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.sidebarLogout} onPress={handleLogout}>
+                <Text style={styles.sidebarLogoutText}>⏻</Text>
+              </TouchableOpacity>
+            </View>
 
-        <View style={[styles.modeBar, theme.border]}>
-          <TouchableOpacity
-            style={[styles.modeButton, currentMode === 'standard' && styles.modeButtonActive]}
-            onPress={() => setCurrentMode('standard')}
-          >
-            <Text style={[styles.modeButtonText, currentMode === 'standard' && styles.modeButtonTextActive, theme.text]}>💬 Стандартный</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeButton, currentMode === 'reasoning' && styles.modeButtonActive]}
-            onPress={() => setCurrentMode('reasoning')}
-          >
-            <Text style={[styles.modeButtonText, currentMode === 'reasoning' && styles.modeButtonTextActive, theme.text]}>🧠 Рассуждение</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeButton, currentMode === 'search' && styles.modeButtonActive]}
-            onPress={() => setCurrentMode('search')}
-          >
-            <Text style={[styles.modeButtonText, currentMode === 'search' && styles.modeButtonTextActive, theme.text]}>🔍 Поиск</Text>
-          </TouchableOpacity>
-        </View>
+            {/* Список чатов */}
+            <View style={styles.sidebarChats}>
+              <View style={styles.sidebarChatsHeader}>
+                <Text style={[styles.sidebarChatsTitle, theme.textSecondary]}>📋 Мои чаты</Text>
+                <TouchableOpacity style={styles.sidebarNewChat} onPress={createNewChat}>
+                  <Text style={styles.sidebarNewChatText}>+ Новый</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.sidebarChatList}>
+                {chats.length === 0 ? (
+                  <Text style={[styles.sidebarEmpty, theme.textSecondary]}>Нет чатов</Text>
+                ) : (
+                  chats.map(chat => (
+                    <TouchableOpacity
+                      key={chat.id}
+                      style={[
+                        styles.sidebarChatItem,
+                        currentChatId === chat.id && styles.sidebarChatItemActive,
+                      ]}
+                      onPress={() => {
+                        setCurrentChatId(chat.id);
+                        setMessages(chat.messages);
+                      }}
+                    >
+                      <Text style={[styles.sidebarChatTitle, theme.text]} numberOfLines={1}>
+                        {chat.title}
+                      </Text>
+                      <View style={styles.sidebarChatRight}>
+                        <Text style={[styles.sidebarChatCount, theme.textSecondary]}>
+                          {chat.messages.length}
+                        </Text>
+                        <TouchableOpacity onPress={() => deleteChat(chat.id)}>
+                          <Text style={styles.sidebarChatDelete}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+            </View>
+          </View>
 
-        {activeTab === 'chats' ? (
-          <View style={styles.chatContainer}>
+          {/* ОСНОВНОЕ ОКНО ЧАТА */}
+          <View style={styles.chatWindow}>
             {currentChatId ? (
               <>
-                <View style={[styles.chatHeader, theme.border]}>
-                  <Text style={[styles.chatTitle, theme.text]}>
+                <View style={[styles.chatHeader, { borderBottomColor: theme.border.borderColor }]}>
+                  <Text style={[styles.chatHeaderTitle, theme.text]}>
                     {chats.find(c => c.id === currentChatId)?.title || 'Чат'}
                   </Text>
-                  <View style={styles.chatHeaderActions}>
-                    <TouchableOpacity onPress={createNewChat}>
-                      <Text style={styles.createChatHeaderText}>➕</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => deleteChat(currentChatId)}>
-                      <Text style={styles.deleteChatButtonText}>🗑️</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity onPress={createNewChat}>
+                    <Text style={styles.chatHeaderNew}>➕</Text>
+                  </TouchableOpacity>
                 </View>
 
-                <View style={{ flex: 1 }}>
-                  <ScrollView
-                    ref={scrollViewRef}
-                    style={[styles.messagesContainer, theme.container]}
-                    contentContainerStyle={styles.messagesContent}
-                    onContentSizeChange={() => {
-                      scrollViewRef.current?.scrollToEnd({ animated: true });
-                    }}
-                  >
-                    {messages.map((msg) => {
-                      const isUser = msg.isUser;
-                      return (
-                        <View key={msg.id} style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}>
-                          <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.aiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
-                            {!isUser && <Text style={[styles.aiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
-
-                            {msg.imageUrl && (
-                              <Image
-                                source={{ uri: msg.imageUrl }}
-                                style={styles.messageImage}
-                                resizeMode="cover"
-                              />
-                            )}
-
-                            {msg.text && msg.text !== '📸 Фото' && renderMessageContent(msg)}
-
-                            <Text style={[styles.timestamp, theme.textSecondary]}>
-                              {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                    {isLoading && (
-                      <View style={[styles.messageWrapper, styles.aiMessageWrapper]}>
-                        <View style={[styles.messageBubble, styles.aiBubble, theme.aiBubble]}>
-                          <ActivityIndicator size="small" color="#6c63ff" />
-                          <Text style={[styles.loadingText, theme.textSecondary]}>Думаю...</Text>
+                <ScrollView
+                  ref={scrollViewRef}
+                  style={[styles.chatMessagesContainer, theme.container]}
+                  contentContainerStyle={styles.chatMessagesContent}
+                  onContentSizeChange={() => scrollViewRef.current?.scrollToEnd()}
+                >
+                  {messages.length === 0 && (
+                    <Text style={[styles.chatEmpty, theme.textSecondary]}>
+                      🤖 Начните диалог с Nemesis AI
+                    </Text>
+                  )}
+                  {messages.map((msg) => {
+                    const isUser = msg.isUser;
+                    return (
+                      <View key={msg.id} style={[styles.msgWrapper, isUser ? styles.msgUserWrapper : styles.msgAiWrapper]}>
+                        <View style={[styles.msgBubble, isUser ? styles.msgUserBubble : styles.msgAiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
+                          {!isUser && <Text style={[styles.msgAiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
+                          {msg.imageUrl && (
+                            <Image source={{ uri: msg.imageUrl }} style={styles.msgImage} resizeMode="cover" />
+                          )}
+                          {msg.text && msg.text !== '📸 Фото' && renderMessageContent(msg)}
+                          <Text style={[styles.msgTimestamp, theme.textSecondary]}>
+                            {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                          </Text>
                         </View>
                       </View>
-                    )}
-                    {isUploading && (
-                      <View style={[styles.messageWrapper, styles.userMessageWrapper]}>
-                        <View style={[styles.messageBubble, styles.userBubble, theme.userBubble]}>
-                          <ActivityIndicator size="small" color="#6c63ff" />
-                          <Text style={[styles.loadingText, theme.textSecondary]}>Загрузка фото...</Text>
-                        </View>
+                    );
+                  })}
+                  {isLoading && (
+                    <View style={[styles.msgWrapper, styles.msgAiWrapper]}>
+                      <View style={[styles.msgBubble, styles.msgAiBubble, theme.aiBubble]}>
+                        <ActivityIndicator size="small" color="#6c63ff" />
+                        <Text style={[styles.msgLoadingText, theme.textSecondary]}>Думаю...</Text>
                       </View>
-                    )}
-                  </ScrollView>
-                </View>
+                    </View>
+                  )}
+                  {isUploading && (
+                    <View style={[styles.msgWrapper, styles.msgUserWrapper]}>
+                      <View style={[styles.msgBubble, styles.msgUserBubble, theme.userBubble]}>
+                        <ActivityIndicator size="small" color="#6c63ff" />
+                        <Text style={[styles.msgLoadingText, theme.textSecondary]}>Загрузка фото...</Text>
+                      </View>
+                    </View>
+                  )}
+                </ScrollView>
 
                 <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={100}>
-                  <View style={[styles.inputContainer, theme.inputContainer]}>
+                  <View style={[styles.inputContainer, { borderTopColor: theme.border.borderColor, backgroundColor: theme.inputContainer.backgroundColor }]}>
                     {imagePreview && (
-                      <View style={styles.imagePreviewContainer}>
-                        <Image source={{ uri: imagePreview }} style={styles.imagePreview} />
-                        <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
-                          <Text style={styles.removeImageText}>✕</Text>
+                      <View style={styles.inputPreviewContainer}>
+                        <Image source={{ uri: imagePreview }} style={styles.inputPreviewImage} />
+                        <TouchableOpacity style={styles.inputPreviewRemove} onPress={removeImage}>
+                          <Text style={styles.inputPreviewRemoveText}>✕</Text>
                         </TouchableOpacity>
                       </View>
                     )}
                     <View style={styles.inputRow}>
-                      <TouchableOpacity style={[styles.attachButton, theme.attachButton]} onPress={pickImage}>
-                        <Text style={[styles.attachButtonText, theme.text]}>📎</Text>
+                      <TouchableOpacity style={[styles.inputAttach, { borderColor: theme.border.borderColor }]} onPress={pickImage}>
+                        <Text style={[styles.inputAttachText, theme.text]}>📎</Text>
                       </TouchableOpacity>
                       <TextInput
-                        style={[styles.input, theme.input, { fontSize: fontSize }]}
+                        style={[styles.inputField, theme.input, { fontSize }]}
                         placeholder="Напиши сообщение..."
                         placeholderTextColor={theme.placeholder}
                         value={inputText}
@@ -1169,216 +1168,28 @@ const App = () => {
                         editable={!isLoading && !isUploading}
                       />
                       <TouchableOpacity
-                        style={[styles.sendButton, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.sendButtonDisabled : null]}
+                        style={[styles.inputSend, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.inputSendDisabled : null]}
                         onPress={sendMessage}
                         disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
                       >
-                        <Text style={styles.sendButtonText}>📤</Text>
+                        <Text style={styles.inputSendText}>📤</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
                 </KeyboardAvoidingView>
               </>
             ) : (
-              <View style={styles.noChatsContainer}>
-                <Text style={[styles.noChatsText, theme.textSecondary]}>🤖 Нет чатов</Text>
-                <TouchableOpacity style={styles.createFirstChatButton} onPress={createNewChat}>
-                  <Text style={styles.createFirstChatButtonText}>➕ Создать первый чат</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {chats.length > 0 && (
-              <View style={[styles.chatListContainer, theme.border]}>
-                <FlatList
-                  data={chats}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[
-                        styles.chatListItem,
-                        currentChatId === item.id && styles.chatListItemActive,
-                        { backgroundColor: currentChatId === item.id ? 'rgba(108,99,255,0.12)' : 'rgba(255,255,255,0.03)', borderColor: currentChatId === item.id ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)' }
-                      ]}
-                      onPress={() => {
-                        setCurrentChatId(item.id);
-                        setMessages(item.messages);
-                      }}
-                    >
-                      <Text style={[styles.chatListItemText, theme.text, { fontSize: fontSize - 4 }]} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={[styles.chatListItemCount, theme.textSecondary]}>
-                        {item.messages.length}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                />
-                <TouchableOpacity
-                  style={styles.createChatListButton}
-                  onPress={createNewChat}
-                >
-                  <Text style={styles.createChatListButtonText}>➕</Text>
+              <View style={styles.noChatContainer}>
+                <Text style={[styles.noChatText, theme.textSecondary]}>🤖 Нет чатов</Text>
+                <TouchableOpacity style={styles.noChatButton} onPress={createNewChat}>
+                  <Text style={styles.noChatButtonText}>➕ Создать первый чат</Text>
                 </TouchableOpacity>
               </View>
             )}
           </View>
-        ) : activeTab === 'profile' ? (
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-            <View style={[styles.profileCard, theme.card]}>
-              <Text style={[styles.profileTitle, theme.text, { fontSize: fontSize + 8 }]}>👤 {currentUser?.username}</Text>
-              <Text style={[styles.profileEmail, theme.textSecondary]}>{currentUser?.email}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                <Text style={[styles.profileRoleLabel, theme.textSecondary]}>Роль:</Text>
-                <Text style={[styles.profileRole, { color: currentUser?.role === 'nemesis' ? '#ffd700' : '#6c63ff', fontSize: fontSize }]}>
-                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
-                </Text>
-              </View>
+        </View>
 
-              <View style={[styles.profileInfoItem, theme.border]}>
-                <Text style={[styles.profileInfoLabel, theme.text]}>💳 Подписка</Text>
-                <Text style={[styles.profileInfoValue, theme.textSecondary]}>
-                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
-                </Text>
-              </View>
-
-              <View style={[styles.profileInfoItem, theme.border]}>
-                <Text style={[styles.profileInfoLabel, theme.text]}>📊 Сообщений</Text>
-                <Text style={[styles.profileInfoValue, theme.textSecondary]}>
-                  {messages.length}
-                </Text>
-              </View>
-
-              <View style={[styles.profileInfoItem, theme.border]}>
-                <Text style={[styles.profileInfoLabel, theme.text]}>🌐 Язык</Text>
-                <Text style={[styles.profileInfoValue, theme.textSecondary]}>Русский 🇷🇺</Text>
-              </View>
-
-              <View style={[styles.profileDivider, theme.border]} />
-
-              <TouchableOpacity
-                style={[styles.profileButton, theme.card]}
-                onPress={() => setShowSettings(true)}
-              >
-                <Text style={[styles.profileButtonText, theme.text, { fontSize: fontSize }]}>🔑 Активировать ключ</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.profileButton, { borderColor: '#ff4455', marginTop: 8 }]}
-                onPress={() => Alert.alert(
-                  '🗑️ Удалить аккаунт',
-                  'Вы уверены? Это действие нельзя отменить. Все данные будут потеряны.',
-                  [
-                    { text: 'Отмена', style: 'cancel' },
-                    {
-                      text: 'Удалить',
-                      style: 'destructive',
-                      onPress: async () => {
-                        try {
-                          const user = auth.currentUser;
-                          if (user) {
-                            await user.delete();
-                            await AsyncStorage.removeItem('user_email');
-                            await AsyncStorage.removeItem('user_password');
-                            setIsLoggedIn(false);
-                            setCurrentUser(null);
-                            Alert.alert('✅', 'Аккаунт удалён');
-                          }
-                        } catch (error: any) {
-                          Alert.alert('Ошибка', error.message);
-                        }
-                      }
-                    }
-                  ]
-                )}
-              >
-                <Text style={[styles.profileButtonText, { color: '#ff4455', fontSize: fontSize }]}>🗑️ Удалить аккаунт</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.profileButton, styles.profileButtonLogout, theme.card, { marginTop: 8 }]}
-                onPress={handleLogout}
-              >
-                <Text style={[styles.profileButtonText, styles.profileButtonTextLogout, { fontSize: fontSize }]}>🚪 Выйти</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        ) : (
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-            <View style={[styles.settingsCard, theme.card]}>
-              <Text style={[styles.settingsTitle, theme.text, { fontSize: fontSize + 4 }]}>⚙️ Настройки</Text>
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🌙 Тёмная тема</Text>
-                <Switch
-                  value={isDarkTheme}
-                  onValueChange={toggleTheme}
-                  trackColor={{ false: '#767577', true: '#6c63ff' }}
-                  thumbColor={isDarkTheme ? '#fff' : '#f4f3f4'}
-                />
-              </View>
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📐 Размер текста</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      const newSize = Math.max(12, fontSize - 2);
-                      setFontSize(newSize);
-                      saveFontSize(newSize);
-                    }}
-                    style={{ padding: 8 }}
-                  >
-                    <Text style={{ fontSize: 20, color: '#6c63ff' }}>−</Text>
-                  </TouchableOpacity>
-                  <Text style={[styles.settingsItemStatus, theme.textSecondary, { marginHorizontal: 12, fontSize: fontSize }]}>
-                    {fontSize}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      const newSize = Math.min(24, fontSize + 2);
-                      setFontSize(newSize);
-                      saveFontSize(newSize);
-                    }}
-                    style={{ padding: 8 }}
-                  >
-                    <Text style={{ fontSize: 20, color: '#6c63ff' }}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {(currentUser?.role === 'ai_basic' ||
-                currentUser?.role === 'ai_max' ||
-                currentUser?.role === 'nemesis') && (
-                <TouchableOpacity
-                  style={[styles.settingsItem, theme.border, { paddingVertical: 14 }]}
-                  onPress={exportChat}
-                >
-                  <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📤 Экспорт чата</Text>
-                  <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>→</Text>
-                </TouchableOpacity>
-              )}
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>ℹ️ О приложении</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>v2.1.0</Text>
-              </View>
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>👥 Команда</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>Kotik Team</Text>
-              </View>
-
-              <View style={[styles.settingsItem, theme.border]}>
-                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📧 Поддержка</Text>
-                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>@Nemesissup</Text>
-              </View>
-            </View>
-          </ScrollView>
-        )}
-
+        {/* Модалка активации ключа */}
         <Modal
           visible={showSettings}
           animationType="slide"
@@ -1388,10 +1199,10 @@ const App = () => {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, theme.card]}>
               <Text style={[styles.modalTitle, theme.text, { fontSize: fontSize + 4 }]}>🔑 Активировать ключ</Text>
-              <Text style={[styles.modalSubtitle, theme.textSecondary, { fontSize: fontSize }]}>Введите ключ подписки</Text>
+              <Text style={[styles.modalSubtitle, theme.textSecondary, { fontSize }]}>Введите ключ подписки</Text>
 
               <TextInput
-                style={[styles.modalInput, theme.input, { fontSize: fontSize }]}
+                style={[styles.modalInput, theme.input, { fontSize }]}
                 placeholder="Введите ключ..."
                 placeholderTextColor={theme.placeholder}
                 value={activateKeyInput}
@@ -1399,21 +1210,14 @@ const App = () => {
                 autoCapitalize="characters"
               />
 
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={activateKey}
-                disabled={isActivating}
-              >
-                <Text style={[styles.modalButtonText, { fontSize: fontSize }]}>
+              <TouchableOpacity style={styles.modalButton} onPress={activateKey} disabled={isActivating}>
+                <Text style={[styles.modalButtonText, { fontSize }]}>
                   {isActivating ? '⏳ Активация...' : '✅ Активировать'}
                 </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={() => setShowSettings(false)}
-              >
-                <Text style={[styles.modalCloseButtonText, theme.textSecondary, { fontSize: fontSize }]}>✕ Закрыть</Text>
+              <TouchableOpacity style={styles.modalClose} onPress={() => setShowSettings(false)}>
+                <Text style={[styles.modalCloseText, theme.textSecondary, { fontSize }]}>✕ Закрыть</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1424,144 +1228,130 @@ const App = () => {
 };
 
 // ============================================================
-//  СТИЛИ
+//  СТИЛИ (как на сайте)
 // ============================================================
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: 10, fontSize: 16 },
 
-  authContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 30 },
-  authTitle: { fontSize: 36, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
+  // ===== АВТОРИЗАЦИЯ =====
+  authContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 30, alignItems: 'center' },
+  authLogo: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: 'rgba(108,99,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(108,99,255,0.1)',
+  },
+  authLogoText: { fontSize: 28, fontWeight: '800', color: '#6c63ff' },
+  authTitle: { fontSize: 30, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
   authSubtitle: { fontSize: 14, textAlign: 'center', marginBottom: 30 },
-  authForm: { borderRadius: 20, padding: 24, borderWidth: 1 },
+  authForm: { borderRadius: 20, padding: 24, borderWidth: 1, width: '100%' },
   authFormTitle: { fontSize: 20, fontWeight: '600', textAlign: 'center', marginBottom: 20 },
   authInput: { borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 12, borderWidth: 1 },
   authButton: { backgroundColor: '#6c63ff', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
   authButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   authLink: { fontSize: 14 },
 
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
-  tabButton: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  tabButtonActive: { backgroundColor: 'rgba(108,99,255,0.15)' },
-  tabText: { fontSize: 13, fontWeight: '500' },
-  tabTextActive: { color: '#6c63ff', fontWeight: '600' },
+  // ===== ОСНОВНОЙ ЛЕЙАУТ =====
+  mainLayout: { flex: 1, flexDirection: 'row', gap: 16, paddingHorizontal: 16, paddingVertical: 12 },
 
-  modeBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    gap: 8,
-  },
-  modeButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  modeButtonActive: {
+  // ===== САЙДБАР =====
+  sidebar: { width: 260, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
+  sidebarProfile: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', gap: 12 },
+  sidebarAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(108,99,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(108,99,255,0.1)',
   },
-  modeButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  modeButtonTextActive: {
-    color: '#6c63ff',
-    fontWeight: '600',
-  },
+  sidebarAvatarText: { fontSize: 14, fontWeight: '700', color: '#6c63ff' },
+  sidebarProfileInfo: { flex: 1 },
+  sidebarName: { fontSize: 14, fontWeight: '600' },
+  sidebarRole: { fontSize: 10, paddingHorizontal: 10, paddingVertical: 2, borderRadius: 12, alignSelf: 'flex-start', marginTop: 2 },
+  role_free: { backgroundColor: 'rgba(255,255,255,0.05)', color: '#8888aa' },
+  role_elite: { backgroundColor: 'rgba(108,99,255,0.1)', color: '#6c63ff' },
+  role_ai_basic: { backgroundColor: 'rgba(108,99,255,0.15)', color: '#6c63ff' },
+  role_ai_max: { backgroundColor: 'rgba(255,215,0,0.1)', color: '#ffd700' },
+  role_nemesis: { backgroundColor: 'rgba(255,215,0,0.2)', color: '#ffd700' },
+  sidebarLogout: { padding: 6 },
+  sidebarLogoutText: { color: '#ff4455', fontSize: 16 },
 
-  chatContainer: { flex: 1 },
-  noChatsContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  noChatsText: { fontSize: 18, marginBottom: 20 },
-  createFirstChatButton: { backgroundColor: '#6c63ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
-  createFirstChatButtonText: { color: '#fff', fontWeight: '600' },
+  sidebarChats: { flex: 1, padding: 14 },
+  sidebarChatsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  sidebarChatsTitle: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  sidebarNewChat: { backgroundColor: 'rgba(108,99,255,0.15)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 },
+  sidebarNewChatText: { color: '#6c63ff', fontSize: 11, fontWeight: '600' },
+  sidebarChatList: { flex: 1 },
+  sidebarEmpty: { textAlign: 'center', paddingTop: 20, fontSize: 13 },
+  sidebarChatItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, marginBottom: 2 },
+  sidebarChatItemActive: { backgroundColor: 'rgba(108,99,255,0.08)' },
+  sidebarChatTitle: { fontSize: 13, flex: 1 },
+  sidebarChatRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sidebarChatCount: { fontSize: 10 },
+  sidebarChatDelete: { color: '#555566', fontSize: 12, paddingHorizontal: 4 },
 
-  chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
-  chatTitle: { fontSize: 16, fontWeight: '600' },
-  chatHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  createChatHeaderText: { fontSize: 20 },
-  deleteChatButtonText: { fontSize: 18 },
+  // ===== ОКНО ЧАТА =====
+  chatWindow: { flex: 1, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', overflow: 'hidden' },
+  chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  chatHeaderTitle: { fontSize: 16, fontWeight: '600' },
+  chatHeaderNew: { fontSize: 18 },
 
-  messagesContainer: { flex: 1 },
-  messagesContent: { paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 20 },
+  chatMessagesContainer: { flex: 1 },
+  chatMessagesContent: { paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 20 },
+  chatEmpty: { textAlign: 'center', paddingTop: 60, fontSize: 16 },
 
-  messageWrapper: { marginBottom: 12, maxWidth: '85%' },
-  userMessageWrapper: { alignSelf: 'flex-end' },
-  aiMessageWrapper: { alignSelf: 'flex-start' },
-  messageBubble: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 18 },
-  userBubble: { borderBottomRightRadius: 4 },
-  aiBubble: { borderBottomLeftRadius: 4 },
-  aiLabel: { fontSize: 10, fontWeight: '600', marginBottom: 4, letterSpacing: 0.5 },
-  userText: { fontSize: 15, lineHeight: 22 },
-  aiText: { fontSize: 15, lineHeight: 22 },
-  messageImage: { width: 200, height: 200, borderRadius: 10, marginBottom: 8, resizeMode: 'cover' },
-  timestamp: { fontSize: 9, marginTop: 4, textAlign: 'right' },
+  // ===== СООБЩЕНИЯ =====
+  msgWrapper: { marginBottom: 12, maxWidth: '85%' },
+  msgUserWrapper: { alignSelf: 'flex-end' },
+  msgAiWrapper: { alignSelf: 'flex-start' },
+  msgBubble: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 18 },
+  msgUserBubble: { borderBottomRightRadius: 4 },
+  msgAiBubble: { borderBottomLeftRadius: 4 },
+  msgAiLabel: { fontSize: 10, fontWeight: '600', marginBottom: 4, letterSpacing: 0.5 },
+  msgUserText: { fontSize: 15, lineHeight: 22, color: '#fff' },
+  msgAiText: { fontSize: 15, lineHeight: 22, color: '#ccc' },
+  msgImage: { width: 200, height: 200, borderRadius: 10, marginBottom: 8, resizeMode: 'cover' },
+  msgTimestamp: { fontSize: 9, marginTop: 4, textAlign: 'right' },
+  msgLoadingText: { marginLeft: 8, fontSize: 14 },
 
+  // ===== КОД-БЛОКИ =====
   codeBlock: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(108,99,255,0.15)', marginVertical: 6, overflow: 'hidden' },
   codeBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(255,255,255,0.04)' },
   codeBlockLang: { color: '#6c63ff', fontSize: 10, fontWeight: '700' },
   codeBlockAction: { color: '#fff', fontSize: 11, fontWeight: '600' },
   codeBlockText: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, color: '#e0e0e0', padding: 10 },
 
+  // ===== ВВОД =====
   inputContainer: { padding: 12, borderTopWidth: 1 },
+  inputPreviewContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  inputPreviewImage: { width: 60, height: 60, borderRadius: 8 },
+  inputPreviewRemove: { position: 'absolute', top: -6, right: -6, backgroundColor: 'rgba(255,0,0,0.8)', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  inputPreviewRemoveText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
-  attachButton: { padding: 12, borderRadius: 12, marginRight: 8, borderWidth: 1 },
-  attachButtonText: { fontSize: 18 },
-  input: { flex: 1, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, maxHeight: 100, fontSize: 15, borderWidth: 1 },
-  sendButton: { backgroundColor: 'rgba(108,99,255,0.15)', padding: 12, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(108,99,255,0.15)' },
-  sendButtonDisabled: { opacity: 0.3 },
-  sendButtonText: { fontSize: 20 },
+  inputAttach: { padding: 12, borderRadius: 12, marginRight: 8, borderWidth: 1 },
+  inputAttachText: { fontSize: 18 },
+  inputField: { flex: 1, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, maxHeight: 100, fontSize: 15, borderWidth: 1 },
+  inputSend: { backgroundColor: 'rgba(108,99,255,0.15)', padding: 12, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(108,99,255,0.15)' },
+  inputSendDisabled: { opacity: 0.3 },
+  inputSendText: { fontSize: 20 },
 
-  imagePreviewContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  imagePreview: { width: 60, height: 60, borderRadius: 8 },
-  removeImageButton: { position: 'absolute', top: -6, right: -6, backgroundColor: 'rgba(255,0,0,0.8)', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
-  removeImageText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  // ===== НЕТ ЧАТА =====
+  noChatContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  noChatText: { fontSize: 18, marginBottom: 20 },
+  noChatButton: { backgroundColor: '#6c63ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  noChatButtonText: { color: '#fff', fontWeight: '600' },
 
-  chatListContainer: {
-    maxHeight: 70,
-    borderTopWidth: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  chatListItem: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, marginHorizontal: 4, maxWidth: 150, borderWidth: 1 },
-  chatListItemActive: { backgroundColor: 'rgba(108,99,255,0.12)' },
-  chatListItemText: { fontSize: 12, marginRight: 6 },
-  chatListItemCount: { fontSize: 10 },
-  createChatListButton: {
-    backgroundColor: 'rgba(108,99,255,0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginLeft: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(108,99,255,0.2)',
-  },
-  createChatListButtonText: { fontSize: 16, color: '#6c63ff' },
-
-  profileCard: { borderRadius: 20, padding: 24, borderWidth: 1 },
-  profileTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
-  profileEmail: { fontSize: 14, marginBottom: 16 },
-  profileRoleLabel: { fontSize: 14, marginRight: 8 },
-  profileRole: { fontSize: 16, fontWeight: '600' },
-  profileInfoItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1 },
-  profileInfoLabel: { fontSize: 15 },
-  profileInfoValue: { fontSize: 14 },
-  profileDivider: { height: 1, marginVertical: 16 },
-  profileButton: { borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1 },
-  profileButtonText: { fontSize: 14 },
-  profileButtonLogout: { borderColor: 'rgba(255,68,68,0.08)' },
-  profileButtonTextLogout: { color: '#ff4455' },
-
-  settingsCard: { borderRadius: 20, padding: 24, borderWidth: 1 },
-  settingsTitle: { fontSize: 20, fontWeight: '600', marginBottom: 16 },
-  settingsItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1 },
-  settingsItemLabel: { fontSize: 15 },
-  settingsItemStatus: { fontSize: 14 },
-
+  // ===== МОДАЛКА =====
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { borderRadius: 24, padding: 32, width: '85%', maxWidth: 400, borderWidth: 1 },
   modalTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
@@ -1569,8 +1359,8 @@ const styles = StyleSheet.create({
   modalInput: { borderRadius: 12, padding: 14, fontSize: 16, marginBottom: 16, borderWidth: 1, textAlign: 'center', letterSpacing: 1 },
   modalButton: { backgroundColor: '#6c63ff', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
   modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  modalCloseButton: { alignItems: 'center', padding: 12 },
-  modalCloseButtonText: { fontSize: 14 },
+  modalClose: { alignItems: 'center', padding: 12 },
+  modalCloseText: { fontSize: 14 },
 });
 
 export default App;
