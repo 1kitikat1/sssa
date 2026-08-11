@@ -8,9 +8,14 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: NemesisAI
+      - path: .
+        excludes:
+          - "*.yaml"
+          - "Podfile"
+          - "codemagic.yaml"
+          - "*.md"
     settings:
       base:
-        INFOPLIST_FILE: NemesisAI/Info.plist
+        INFOPLIST_FILE: Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.nemesis.ai
         CODE_SIGN_STYLE: Automatic
