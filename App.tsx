@@ -15,19 +15,14 @@ import {
   StatusBar,
   Image,
   Switch,
-  Animated,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
-import { LinearGradient } from 'expo-linear-gradient';
-import { WebView } from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
-  initializeAuth,
-  getReactNativePersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -51,16 +46,7 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-
-let auth: ReturnType<typeof getAuth>;
-try {
-  auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage),
-  });
-} catch (e) {
-  auth = getAuth(app);
-}
-
+const auth = getAuth(app);
 const database = getDatabase(app);
 
 // ============================================================
@@ -98,7 +84,6 @@ const SYSTEM_PROMPT = `
 ПРАВИЛА ОФОРМЛЕНИЯ КОДА:
 - Любой код ВСЕГДА оформляй в блок \`\`\`язык ... \`\`\`.
 - Один блок кода = один язык.
-- Если ответ длинный, сократи пояснения, но не разрывай блок кода.
 `;
 
 // ============================================================
@@ -160,64 +145,6 @@ const ROLE_CONFIG: Record<string, RolePermissions> = {
 };
 
 // ============================================================
-//  ПАРСИНГ СООБЩЕНИЙ
-// ============================================================
-type MessagePart =
-  | { type: 'text'; content: string }
-  | { type: 'code'; lang: string; content: string; complete: boolean };
-
-function parseMessageParts(text: string): MessagePart[] {
-  const parts: MessagePart[] = [];
-  const closedRegex = /```(\w+)?\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let m: RegExpExecArray | null;
-
-  while ((m = closedRegex.exec(text)) !== null) {
-    if (m.index > lastIndex) {
-      parts.push({ type: 'text', content: text.slice(lastIndex, m.index) });
-    }
-    parts.push({ type: 'code', lang: m[1] || 'plaintext', content: m[2], complete: true });
-    lastIndex = closedRegex.lastIndex;
-  }
-
-  const rest = text.slice(lastIndex);
-  const openMatch = rest.match(/```(\w+)?\n?([\s\S]*)$/);
-  if (openMatch && rest.includes('```')) {
-    if (openMatch.index! > 0) {
-      parts.push({ type: 'text', content: rest.slice(0, openMatch.index) });
-    }
-    parts.push({ type: 'code', lang: openMatch[1] || 'plaintext', content: openMatch[2] || '', complete: false });
-  } else if (rest) {
-    parts.push({ type: 'text', content: rest });
-  }
-
-  return parts;
-}
-
-const HTML_LANGS = ['html', 'htm', 'xhtml'];
-
-function wrapHtmlForPreview(rawCode: string): string {
-  let code = rawCode;
-  const trimmed = code.trim().toLowerCase();
-  if (!trimmed.startsWith('<!doctype') && !trimmed.startsWith('<html')) {
-    code = `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{font-family:Arial,sans-serif;padding:20px;margin:0;}*{box-sizing:border-box;}</style></head><body>${code}</body></html>`;
-  }
-  const shim = `<script>
-    (function(){
-      function memoryStorage(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null;},setItem:function(k,v){s[k]=String(v);},removeItem:function(k){delete s[k];},clear:function(){s={};},key:function(i){return Object.keys(s)[i]||null;},get length(){return Object.keys(s).length;}};}
-      function ensure(name){try{window[name].setItem('__t','1');window[name].removeItem('__t');}catch(e){try{Object.defineProperty(window,name,{value:memoryStorage(),configurable:true});}catch(e2){}}}
-      ensure('localStorage'); ensure('sessionStorage');
-      function showErr(msg){var b=document.createElement('div');b.style.cssText='position:fixed;left:0;right:0;bottom:0;background:#2a0d0d;color:#ff8080;font:12px monospace;padding:10px;z-index:999999;white-space:pre-wrap;';b.textContent='⚠ Ошибка: '+msg;document.body.appendChild(b);}
-      window.addEventListener('error', function(e){ showErr((e&&e.message)||'Неизвестная ошибка'); });
-      window.addEventListener('unhandledrejection', function(e){ showErr((e&&e.reason&&e.reason.message)||'Ошибка промиса'); });
-    })();
-  <\/script>`;
-  if (/<head[^>]*>/i.test(code)) return code.replace(/<head[^>]*>/i, (m) => m + shim);
-  if (/<body[^>]*>/i.test(code)) return code.replace(/<body[^>]*>/i, (m) => m + shim);
-  return shim + code;
-}
-
-// ============================================================
 //  ЗАГРУЗКА ФОТО
 // ============================================================
 const uploadImage = async (uri: string): Promise<string> => {
@@ -245,96 +172,6 @@ const uploadImage = async (uri: string): Promise<string> => {
     throw new Error('Ошибка загрузки фото');
   }
 };
-
-// ============================================================
-//  АНИМИРОВАННОЕ ПОЯВЛЕНИЕ СООБЩЕНИЯ
-// ============================================================
-const FadeInMessage: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(8)).current;
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 260, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: 0, duration: 260, useNativeDriver: true }),
-    ]).start();
-  }, []);
-  return (
-    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
-      {children}
-    </Animated.View>
-  );
-};
-
-// ============================================================
-//  АНИМИРОВАННЫЕ ТОЧКИ "ПЕЧАТАЕТ"
-// ============================================================
-const TypingDots: React.FC = () => {
-  const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
-  useEffect(() => {
-    const anims = dots.map((d, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 150),
-          Animated.timing(d, { toValue: 1, duration: 350, useNativeDriver: true }),
-          Animated.timing(d, { toValue: 0, duration: 350, useNativeDriver: true }),
-          Animated.delay((2 - i) * 150),
-        ])
-      )
-    );
-    anims.forEach(a => a.start());
-    return () => anims.forEach(a => a.stop());
-  }, []);
-  return (
-    <View style={{ flexDirection: 'row', gap: 4 }}>
-      {dots.map((d, i) => (
-        <Animated.View
-          key={i}
-          style={{
-            width: 5, height: 5, borderRadius: 3, backgroundColor: '#6c63ff',
-            opacity: d.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
-            transform: [{ translateY: d.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) }],
-          }}
-        />
-      ))}
-    </View>
-  );
-};
-
-// ============================================================
-//  ERROR BOUNDARY
-// ============================================================
-class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { error: Error | null }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { error: null };
-  }
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('❌ Nemesis AI crashed:', error, info);
-  }
-  render() {
-    if (this.state.error) {
-      return (
-        <SafeAreaProvider>
-          <SafeAreaView style={{ flex: 1, backgroundColor: '#07070d', padding: 20, justifyContent: 'center' }}>
-            <Text style={{ color: '#ff4455', fontSize: 16, fontWeight: '700', marginBottom: 10 }}>
-              ⚠ Произошла ошибка
-            </Text>
-            <Text style={{ color: '#8888aa', fontSize: 13 }}>
-              {this.state.error.message}
-            </Text>
-          </SafeAreaView>
-        </SafeAreaProvider>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 // ============================================================
 //  ОСНОВНОЙ КОМПОНЕНТ
@@ -369,8 +206,6 @@ const App = () => {
   const [activeTab, setActiveTab] = useState<'chats' | 'profile' | 'settings'>('chats');
   const [activateKeyInput, setActivateKeyInput] = useState('');
   const [isActivating, setIsActivating] = useState(false);
-
-  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
 
   const [currentMode, setCurrentMode] = useState<Mode>('standard');
 
@@ -1007,6 +842,30 @@ const App = () => {
   };
 
   // ============================================================
+  //  ПАРСИНГ КОДА
+  // ============================================================
+  const parseCodeBlocks = (text: string) => {
+    const parts: { type: 'text' | 'code'; content: string; lang?: string }[] = [];
+    const regex = /```(\w+)?\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ type: 'text', content: text.slice(lastIndex, match.index) });
+      }
+      parts.push({ type: 'code', lang: match[1] || 'plaintext', content: match[2] });
+      lastIndex = regex.lastIndex;
+    }
+
+    if (lastIndex < text.length) {
+      parts.push({ type: 'text', content: text.slice(lastIndex) });
+    }
+
+    return parts;
+  };
+
+  // ============================================================
   //  ТЕМЫ
   // ============================================================
   const theme = isDarkTheme ? {
@@ -1022,7 +881,7 @@ const App = () => {
     header: { backgroundColor: 'rgba(7,7,13,0.95)' },
     border: { borderColor: 'rgba(255,255,255,0.05)' },
     statusBar: '#07070d',
-    codeBg: '#000000c0',
+    codeBg: '#1a1a2e',
   } : {
     container: { backgroundColor: '#f5f5f5' },
     text: { color: '#1a1a1a' },
@@ -1036,45 +895,37 @@ const App = () => {
     header: { backgroundColor: 'rgba(255,255,255,0.95)' },
     border: { borderColor: 'rgba(0,0,0,0.05)' },
     statusBar: '#f5f5f5',
-    codeBg: '#00000010',
+    codeBg: '#e8e8e8',
   };
 
   // ============================================================
   //  РЕНДЕР СООБЩЕНИЯ
   // ============================================================
-  const renderMessageBody = (msg: Message) => {
-    const parts = parseMessageParts(msg.text);
-    return parts.map((part, i) => {
+  const renderMessageContent = (msg: Message) => {
+    const parts = parseCodeBlocks(msg.text);
+
+    return parts.map((part, index) => {
       if (part.type === 'text') {
         if (!part.content.trim()) return null;
         return (
-          <Text key={i} style={[msg.isUser ? styles.userText : styles.aiText, theme.text, { fontSize: fontSize }]}>
+          <Text key={index} style={[msg.isUser ? styles.userText : styles.aiText, theme.text, { fontSize }]}>
             {part.content}
           </Text>
         );
       }
-      const isHtml = HTML_LANGS.includes(part.lang.toLowerCase());
+
       return (
-        <View key={i} style={[styles.codeBlock, { backgroundColor: theme.codeBg }, !part.complete && styles.codeBlockPending]}>
+        <View key={index} style={[styles.codeBlock, { backgroundColor: theme.codeBg }]}>
           <View style={styles.codeBlockHeader}>
-            <Text style={styles.codeBlockLang}>{part.lang.toUpperCase()}</Text>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              {part.complete && isHtml && (
-                <TouchableOpacity onPress={() => setPreviewHtml(wrapHtmlForPreview(part.content))}>
-                  <Text style={styles.codeBlockAction}>▶ Просмотр</Text>
-                </TouchableOpacity>
-              )}
-              {part.complete ? (
-                <TouchableOpacity onPress={async () => {
-                  await Clipboard.setStringAsync(part.content);
-                  Alert.alert('✅', 'Код скопирован');
-                }}>
-                  <Text style={styles.codeBlockAction}>📋 Копировать</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.codeBlockTyping}>печатает…</Text>
-              )}
-            </View>
+            <Text style={styles.codeBlockLang}>{part.lang?.toUpperCase() || 'CODE'}</Text>
+            <TouchableOpacity
+              onPress={async () => {
+                await Clipboard.setStringAsync(part.content);
+                Alert.alert('✅', 'Код скопирован');
+              }}
+            >
+              <Text style={styles.codeBlockAction}>📋 Копировать</Text>
+            </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <Text style={styles.codeBlockText}>{part.content}</Text>
@@ -1105,14 +956,7 @@ const App = () => {
       <SafeAreaProvider>
         <SafeAreaView style={[styles.container, theme.container]}>
           <View style={styles.authContainer}>
-            <LinearGradient
-              colors={['#6c63ff', '#a78bfa', '#ffd700']}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={styles.authIconRing}
-            >
-              <Text style={styles.authIconText}>N</Text>
-            </LinearGradient>
-            <Text style={[styles.authTitle, theme.text]}>Nemesis AI</Text>
+            <Text style={[styles.authTitle, theme.text]}>🤖 Nemesis AI</Text>
             <Text style={[styles.authSubtitle, theme.textSecondary]}>Создан командой Kotik Team</Text>
 
             {!showRegister ? (
@@ -1135,10 +979,8 @@ const App = () => {
                   onChangeText={setLoginPassword}
                   secureTextEntry
                 />
-                <TouchableOpacity onPress={handleLogin}>
-                  <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.authButton}>
-                    <Text style={styles.authButtonText}>Войти</Text>
-                  </LinearGradient>
+                <TouchableOpacity style={styles.authButton} onPress={handleLogin}>
+                  <Text style={styles.authButtonText}>Войти</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setShowRegister(true)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Нет аккаунта? Зарегистрироваться</Text>
@@ -1171,10 +1013,8 @@ const App = () => {
                   onChangeText={setRegPassword}
                   secureTextEntry
                 />
-                <TouchableOpacity onPress={handleRegister}>
-                  <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.authButton}>
-                    <Text style={styles.authButtonText}>Зарегистрироваться</Text>
-                  </LinearGradient>
+                <TouchableOpacity style={styles.authButton} onPress={handleRegister}>
+                  <Text style={styles.authButtonText}>Зарегистрироваться</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setShowRegister(false)}>
                   <Text style={[styles.authLink, { color: '#6c63ff', textAlign: 'center', marginTop: 16, fontSize: 14 }]}>Уже есть аккаунт? Войти</Text>
@@ -1188,428 +1028,398 @@ const App = () => {
   }
 
   return (
-    <ErrorBoundary>
-      <SafeAreaProvider>
-        <SafeAreaView style={[styles.container, theme.container]}>
-          <StatusBar barStyle={isDarkTheme ? 'light-content' : 'dark-content'} backgroundColor={theme.statusBar} />
+    <SafeAreaProvider>
+      <SafeAreaView style={[styles.container, theme.container]}>
+        <StatusBar barStyle={isDarkTheme ? 'light-content' : 'dark-content'} backgroundColor={theme.statusBar} />
 
-          <View style={[styles.header, theme.header]}>
-            <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.headerIcon}>
-              <Text style={styles.headerIconText}>N</Text>
-            </LinearGradient>
-            <TouchableOpacity
-              style={[styles.tabButton, activeTab === 'chats' && styles.tabButtonActive]}
-              onPress={() => setActiveTab('chats')}
-            >
-              <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive, theme.text]}>💬 Чаты</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabButton, activeTab === 'profile' && styles.tabButtonActive]}
-              onPress={() => setActiveTab('profile')}
-            >
-              <Text style={[styles.tabText, activeTab === 'profile' && styles.tabTextActive, theme.text]}>👤 Профиль</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabButton, activeTab === 'settings' && styles.tabButtonActive]}
-              onPress={() => setActiveTab('settings')}
-            >
-              <Text style={[styles.tabText, activeTab === 'settings' && styles.tabTextActive, theme.text]}>⚙️ Настройки</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={[styles.header, theme.header]}>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'chats' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('chats')}
+          >
+            <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive, theme.text]}>💬 Чаты</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'profile' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('profile')}
+          >
+            <Text style={[styles.tabText, activeTab === 'profile' && styles.tabTextActive, theme.text]}>👤 Профиль</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'settings' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('settings')}
+          >
+            <Text style={[styles.tabText, activeTab === 'settings' && styles.tabTextActive, theme.text]}>⚙️ Настройки</Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={[styles.modeBar, theme.border]}>
-            <TouchableOpacity
-              style={[styles.modeButton, currentMode === 'standard' && styles.modeButtonActive]}
-              onPress={() => setCurrentMode('standard')}
-            >
-              <Text style={[styles.modeButtonText, currentMode === 'standard' && styles.modeButtonTextActive, theme.text]}>💬 Стандартный</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, currentMode === 'reasoning' && styles.modeButtonActive]}
-              onPress={() => setCurrentMode('reasoning')}
-            >
-              <Text style={[styles.modeButtonText, currentMode === 'reasoning' && styles.modeButtonTextActive, theme.text]}>🧠 Рассуждение</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeButton, currentMode === 'search' && styles.modeButtonActive]}
-              onPress={() => setCurrentMode('search')}
-            >
-              <Text style={[styles.modeButtonText, currentMode === 'search' && styles.modeButtonTextActive, theme.text]}>🔍 Поиск</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={[styles.modeBar, theme.border]}>
+          <TouchableOpacity
+            style={[styles.modeButton, currentMode === 'standard' && styles.modeButtonActive]}
+            onPress={() => setCurrentMode('standard')}
+          >
+            <Text style={[styles.modeButtonText, currentMode === 'standard' && styles.modeButtonTextActive, theme.text]}>💬 Стандартный</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeButton, currentMode === 'reasoning' && styles.modeButtonActive]}
+            onPress={() => setCurrentMode('reasoning')}
+          >
+            <Text style={[styles.modeButtonText, currentMode === 'reasoning' && styles.modeButtonTextActive, theme.text]}>🧠 Рассуждение</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeButton, currentMode === 'search' && styles.modeButtonActive]}
+            onPress={() => setCurrentMode('search')}
+          >
+            <Text style={[styles.modeButtonText, currentMode === 'search' && styles.modeButtonTextActive, theme.text]}>🔍 Поиск</Text>
+          </TouchableOpacity>
+        </View>
 
-          {activeTab === 'chats' ? (
-            <View style={styles.chatContainer}>
-              {currentChatId ? (
-                <>
-                  <View style={[styles.chatHeader, theme.border]}>
-                    <Text style={[styles.chatTitle, theme.text]}>
-                      {chats.find(c => c.id === currentChatId)?.title || 'Чат'}
-                    </Text>
-                    <View style={styles.chatHeaderActions}>
-                      <TouchableOpacity onPress={createNewChat}>
-                        <Text style={styles.createChatHeaderText}>➕</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => deleteChat(currentChatId)}>
-                        <Text style={styles.deleteChatButtonText}>🗑️</Text>
-                      </TouchableOpacity>
-                    </View>
+        {activeTab === 'chats' ? (
+          <View style={styles.chatContainer}>
+            {currentChatId ? (
+              <>
+                <View style={[styles.chatHeader, theme.border]}>
+                  <Text style={[styles.chatTitle, theme.text]}>
+                    {chats.find(c => c.id === currentChatId)?.title || 'Чат'}
+                  </Text>
+                  <View style={styles.chatHeaderActions}>
+                    <TouchableOpacity onPress={createNewChat}>
+                      <Text style={styles.createChatHeaderText}>➕</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => deleteChat(currentChatId)}>
+                      <Text style={styles.deleteChatButtonText}>🗑️</Text>
+                    </TouchableOpacity>
                   </View>
+                </View>
 
-                  <View style={{ flex: 1 }}>
-                    <ScrollView
-                      ref={scrollViewRef}
-                      style={[styles.messagesContainer, theme.container]}
-                      contentContainerStyle={styles.messagesContent}
-                      onContentSizeChange={() => {
-                        scrollViewRef.current?.scrollToEnd({ animated: true });
-                      }}
-                    >
-                      {messages.map((msg) => {
-                        const isUser = msg.isUser;
-                        return (
-                          <FadeInMessage key={msg.id}>
-                            <View style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}>
-                              <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.aiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
-                                {!isUser && <Text style={[styles.aiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
+                <View style={{ flex: 1 }}>
+                  <ScrollView
+                    ref={scrollViewRef}
+                    style={[styles.messagesContainer, theme.container]}
+                    contentContainerStyle={styles.messagesContent}
+                    onContentSizeChange={() => {
+                      scrollViewRef.current?.scrollToEnd({ animated: true });
+                    }}
+                  >
+                    {messages.map((msg) => {
+                      const isUser = msg.isUser;
+                      return (
+                        <View key={msg.id} style={[styles.messageWrapper, isUser ? styles.userMessageWrapper : styles.aiMessageWrapper]}>
+                          <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.aiBubble, isUser ? theme.userBubble : theme.aiBubble]}>
+                            {!isUser && <Text style={[styles.aiLabel, { color: '#6c63ff' }]}>🤖 Nemesis AI</Text>}
 
-                                {msg.imageUrl && (
-                                  <Image
-                                    source={{ uri: msg.imageUrl }}
-                                    style={styles.messageImage}
-                                    resizeMode="cover"
-                                  />
-                                )}
+                            {msg.imageUrl && (
+                              <Image
+                                source={{ uri: msg.imageUrl }}
+                                style={styles.messageImage}
+                                resizeMode="cover"
+                              />
+                            )}
 
-                                {msg.text && msg.text !== '📸 Фото' && renderMessageBody(msg)}
+                            {msg.text && msg.text !== '📸 Фото' && renderMessageContent(msg)}
 
-                                <Text style={[styles.timestamp, theme.textSecondary]}>
-                                  {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                                </Text>
-                              </View>
-                            </View>
-                          </FadeInMessage>
-                        );
-                      })}
-                      {isLoading && (
-                        <View style={[styles.messageWrapper, styles.aiMessageWrapper]}>
-                          <View style={[styles.messageBubble, styles.aiBubble, theme.aiBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
-                            <TypingDots />
-                            <Text style={[styles.loadingText, theme.textSecondary, { marginTop: 0 }]}>Думаю...</Text>
+                            <Text style={[styles.timestamp, theme.textSecondary]}>
+                              {new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
                           </View>
                         </View>
-                      )}
-                      {isUploading && (
-                        <View style={[styles.messageWrapper, styles.userMessageWrapper]}>
-                          <View style={[styles.messageBubble, styles.userBubble, theme.userBubble]}>
-                            <ActivityIndicator size="small" color="#6c63ff" />
-                            <Text style={[styles.loadingText, theme.textSecondary]}>Загрузка фото...</Text>
-                          </View>
+                      );
+                    })}
+                    {isLoading && (
+                      <View style={[styles.messageWrapper, styles.aiMessageWrapper]}>
+                        <View style={[styles.messageBubble, styles.aiBubble, theme.aiBubble]}>
+                          <ActivityIndicator size="small" color="#6c63ff" />
+                          <Text style={[styles.loadingText, theme.textSecondary]}>Думаю...</Text>
                         </View>
-                      )}
-                    </ScrollView>
-                  </View>
+                      </View>
+                    )}
+                    {isUploading && (
+                      <View style={[styles.messageWrapper, styles.userMessageWrapper]}>
+                        <View style={[styles.messageBubble, styles.userBubble, theme.userBubble]}>
+                          <ActivityIndicator size="small" color="#6c63ff" />
+                          <Text style={[styles.loadingText, theme.textSecondary]}>Загрузка фото...</Text>
+                        </View>
+                      </View>
+                    )}
+                  </ScrollView>
+                </View>
 
-                  <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={100}>
-                    <View style={[styles.inputContainer, theme.inputContainer]}>
-                      {imagePreview && (
-                        <View style={styles.imagePreviewContainer}>
-                          <Image source={{ uri: imagePreview }} style={styles.imagePreview} />
-                          <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
-                            <Text style={styles.removeImageText}>✕</Text>
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                      <View style={styles.inputRow}>
-                        <TouchableOpacity style={styles.attachButton} onPress={pickImage}>
-                          <Text style={[styles.attachButtonText, theme.text]}>📎</Text>
-                        </TouchableOpacity>
-                        <TextInput
-                          style={[styles.input, theme.input, { fontSize: fontSize }]}
-                          placeholder="Напиши сообщение..."
-                          placeholderTextColor={theme.placeholder}
-                          value={inputText}
-                          onChangeText={setInputText}
-                          multiline
-                          maxLength={1000}
-                          editable={!isLoading && !isUploading}
-                        />
-                        <TouchableOpacity
-                          onPress={sendMessage}
-                          disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
-                        >
-                          <LinearGradient
-                            colors={['#6c63ff', '#a78bfa']}
-                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                            style={[styles.sendButton, ((!inputText.trim() && !imagePreview) || isLoading || isUploading) && styles.sendButtonDisabled]}
-                          >
-                            <Text style={styles.sendButtonText}>📤</Text>
-                          </LinearGradient>
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={100}>
+                  <View style={[styles.inputContainer, theme.inputContainer]}>
+                    {imagePreview && (
+                      <View style={styles.imagePreviewContainer}>
+                        <Image source={{ uri: imagePreview }} style={styles.imagePreview} />
+                        <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
+                          <Text style={styles.removeImageText}>✕</Text>
                         </TouchableOpacity>
                       </View>
-                    </View>
-                  </KeyboardAvoidingView>
-                </>
-              ) : (
-                <View style={styles.noChatsContainer}>
-                  <Text style={[styles.noChatsText, theme.textSecondary]}>🤖 Нет чатов</Text>
-                  <TouchableOpacity onPress={createNewChat}>
-                    <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.createFirstChatButton}>
-                      <Text style={styles.createFirstChatButtonText}>➕ Создать первый чат</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {chats.length > 0 && (
-                <View style={[styles.chatListContainer, theme.border]}>
-                  <FlatList
-                    data={chats}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={[
-                          styles.chatListItem,
-                          currentChatId === item.id && styles.chatListItemActive,
-                          { backgroundColor: currentChatId === item.id ? 'rgba(108,99,255,0.14)' : 'rgba(255,255,255,0.03)', borderColor: currentChatId === item.id ? '#6c63ff' : 'rgba(255,255,255,0.04)' }
-                        ]}
-                        onPress={() => {
-                          setCurrentChatId(item.id);
-                          setMessages(item.messages);
-                        }}
-                      >
-                        <Text style={[styles.chatListItemText, theme.text, { fontSize: fontSize - 4 }]} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                        <Text style={[styles.chatListItemCount, theme.textSecondary]}>
-                          {item.messages.length}
-                        </Text>
-                      </TouchableOpacity>
                     )}
-                  />
-                  <TouchableOpacity onPress={createNewChat}>
-                    <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.createChatListButton}>
-                      <Text style={styles.createChatListButtonText}>➕</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          ) : activeTab === 'profile' ? (
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-              <View style={[styles.profileCard, theme.card]}>
-                <Text style={[styles.profileTitle, theme.text, { fontSize: fontSize + 8 }]}>👤 {currentUser?.username}</Text>
-                <Text style={[styles.profileEmail, theme.textSecondary]}>{currentUser?.email}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                  <Text style={[styles.profileRoleLabel, theme.textSecondary]}>Роль:</Text>
-                  <Text style={[styles.profileRole, { color: currentUser?.role === 'nemesis' ? '#ffd700' : '#6c63ff', fontSize: fontSize }]}>
-                    {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
-                  </Text>
-                </View>
-
-                <View style={[styles.profileInfoItem, theme.border]}>
-                  <Text style={[styles.profileInfoLabel, theme.text]}>💳 Подписка</Text>
-                  <Text style={[styles.profileInfoValue, theme.textSecondary]}>
-                    {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
-                  </Text>
-                </View>
-
-                <View style={[styles.profileInfoItem, theme.border]}>
-                  <Text style={[styles.profileInfoLabel, theme.text]}>📊 Сообщений</Text>
-                  <Text style={[styles.profileInfoValue, theme.textSecondary]}>
-                    {messages.length}
-                  </Text>
-                </View>
-
-                <View style={[styles.profileInfoItem, theme.border]}>
-                  <Text style={[styles.profileInfoLabel, theme.text]}>🌐 Язык</Text>
-                  <Text style={[styles.profileInfoValue, theme.textSecondary]}>Русский 🇷🇺</Text>
-                </View>
-
-                <View style={[styles.profileDivider, theme.border]} />
-
-                <TouchableOpacity
-                  style={[styles.profileButton, theme.card]}
-                  onPress={() => setShowSettings(true)}
-                >
-                  <Text style={[styles.profileButtonText, theme.text, { fontSize: fontSize }]}>🔑 Активировать ключ</Text>
+                    <View style={styles.inputRow}>
+                      <TouchableOpacity style={[styles.attachButton, theme.attachButton]} onPress={pickImage}>
+                        <Text style={[styles.attachButtonText, theme.text]}>📎</Text>
+                      </TouchableOpacity>
+                      <TextInput
+                        style={[styles.input, theme.input, { fontSize: fontSize }]}
+                        placeholder="Напиши сообщение..."
+                        placeholderTextColor={theme.placeholder}
+                        value={inputText}
+                        onChangeText={setInputText}
+                        multiline
+                        maxLength={1000}
+                        editable={!isLoading && !isUploading}
+                      />
+                      <TouchableOpacity
+                        style={[styles.sendButton, (!inputText.trim() && !imagePreview) || isLoading || isUploading ? styles.sendButtonDisabled : null]}
+                        onPress={sendMessage}
+                        disabled={(!inputText.trim() && !imagePreview) || isLoading || isUploading}
+                      >
+                        <Text style={styles.sendButtonText}>📤</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </KeyboardAvoidingView>
+              </>
+            ) : (
+              <View style={styles.noChatsContainer}>
+                <Text style={[styles.noChatsText, theme.textSecondary]}>🤖 Нет чатов</Text>
+                <TouchableOpacity style={styles.createFirstChatButton} onPress={createNewChat}>
+                  <Text style={styles.createFirstChatButtonText}>➕ Создать первый чат</Text>
                 </TouchableOpacity>
+              </View>
+            )}
 
+            {chats.length > 0 && (
+              <View style={[styles.chatListContainer, theme.border]}>
+                <FlatList
+                  data={chats}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.chatListItem,
+                        currentChatId === item.id && styles.chatListItemActive,
+                        { backgroundColor: currentChatId === item.id ? 'rgba(108,99,255,0.12)' : 'rgba(255,255,255,0.03)', borderColor: currentChatId === item.id ? 'rgba(108,99,255,0.15)' : 'rgba(255,255,255,0.04)' }
+                      ]}
+                      onPress={() => {
+                        setCurrentChatId(item.id);
+                        setMessages(item.messages);
+                      }}
+                    >
+                      <Text style={[styles.chatListItemText, theme.text, { fontSize: fontSize - 4 }]} numberOfLines={1}>
+                        {item.title}
+                      </Text>
+                      <Text style={[styles.chatListItemCount, theme.textSecondary]}>
+                        {item.messages.length}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
                 <TouchableOpacity
-                  style={[styles.profileButton, { borderColor: '#ff4455', marginTop: 8 }]}
-                  onPress={() => Alert.alert(
-                    '🗑️ Удалить аккаунт',
-                    'Вы уверены? Это действие нельзя отменить. Все данные будут потеряны.',
-                    [
-                      { text: 'Отмена', style: 'cancel' },
-                      {
-                        text: 'Удалить',
-                        style: 'destructive',
-                        onPress: async () => {
-                          try {
-                            const user = auth.currentUser;
-                            if (user) {
-                              await user.delete();
-                              await AsyncStorage.removeItem('user_email');
-                              await AsyncStorage.removeItem('user_password');
-                              setIsLoggedIn(false);
-                              setCurrentUser(null);
-                              Alert.alert('✅', 'Аккаунт удалён');
-                            }
-                          } catch (error: any) {
-                            Alert.alert('Ошибка', error.message);
+                  style={styles.createChatListButton}
+                  onPress={createNewChat}
+                >
+                  <Text style={styles.createChatListButtonText}>➕</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        ) : activeTab === 'profile' ? (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
+            <View style={[styles.profileCard, theme.card]}>
+              <Text style={[styles.profileTitle, theme.text, { fontSize: fontSize + 8 }]}>👤 {currentUser?.username}</Text>
+              <Text style={[styles.profileEmail, theme.textSecondary]}>{currentUser?.email}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={[styles.profileRoleLabel, theme.textSecondary]}>Роль:</Text>
+                <Text style={[styles.profileRole, { color: currentUser?.role === 'nemesis' ? '#ffd700' : '#6c63ff', fontSize: fontSize }]}>
+                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
+                </Text>
+              </View>
+
+              <View style={[styles.profileInfoItem, theme.border]}>
+                <Text style={[styles.profileInfoLabel, theme.text]}>💳 Подписка</Text>
+                <Text style={[styles.profileInfoValue, theme.textSecondary]}>
+                  {ROLE_CONFIG[currentUser?.role || 'free']?.label || 'FREE'}
+                </Text>
+              </View>
+
+              <View style={[styles.profileInfoItem, theme.border]}>
+                <Text style={[styles.profileInfoLabel, theme.text]}>📊 Сообщений</Text>
+                <Text style={[styles.profileInfoValue, theme.textSecondary]}>
+                  {messages.length}
+                </Text>
+              </View>
+
+              <View style={[styles.profileInfoItem, theme.border]}>
+                <Text style={[styles.profileInfoLabel, theme.text]}>🌐 Язык</Text>
+                <Text style={[styles.profileInfoValue, theme.textSecondary]}>Русский 🇷🇺</Text>
+              </View>
+
+              <View style={[styles.profileDivider, theme.border]} />
+
+              <TouchableOpacity
+                style={[styles.profileButton, theme.card]}
+                onPress={() => setShowSettings(true)}
+              >
+                <Text style={[styles.profileButtonText, theme.text, { fontSize: fontSize }]}>🔑 Активировать ключ</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.profileButton, { borderColor: '#ff4455', marginTop: 8 }]}
+                onPress={() => Alert.alert(
+                  '🗑️ Удалить аккаунт',
+                  'Вы уверены? Это действие нельзя отменить. Все данные будут потеряны.',
+                  [
+                    { text: 'Отмена', style: 'cancel' },
+                    {
+                      text: 'Удалить',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          const user = auth.currentUser;
+                          if (user) {
+                            await user.delete();
+                            await AsyncStorage.removeItem('user_email');
+                            await AsyncStorage.removeItem('user_password');
+                            setIsLoggedIn(false);
+                            setCurrentUser(null);
+                            Alert.alert('✅', 'Аккаунт удалён');
                           }
+                        } catch (error: any) {
+                          Alert.alert('Ошибка', error.message);
                         }
                       }
-                    ]
-                  )}
-                >
-                  <Text style={[styles.profileButtonText, { color: '#ff4455', fontSize: fontSize }]}>🗑️ Удалить аккаунт</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.profileButton, styles.profileButtonLogout, theme.card, { marginTop: 8 }]}
-                  onPress={handleLogout}
-                >
-                  <Text style={[styles.profileButtonText, styles.profileButtonTextLogout, { fontSize: fontSize }]}>🚪 Выйти</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          ) : (
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-              <View style={[styles.settingsCard, theme.card]}>
-                <Text style={[styles.settingsTitle, theme.text, { fontSize: fontSize + 4 }]}>⚙️ Настройки</Text>
-
-                <View style={[styles.settingsItem, theme.border]}>
-                  <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🌙 Тёмная тема</Text>
-                  <Switch
-                    value={isDarkTheme}
-                    onValueChange={toggleTheme}
-                    trackColor={{ false: '#767577', true: '#6c63ff' }}
-                    thumbColor={isDarkTheme ? '#fff' : '#f4f3f4'}
-                  />
-                </View>
-
-                <View style={[styles.settingsItem, theme.border]}>
-                  <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📐 Размер текста</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        const newSize = Math.max(12, fontSize - 2);
-                        setFontSize(newSize);
-                        saveFontSize(newSize);
-                      }}
-                      style={{ padding: 8 }}
-                    >
-                      <Text style={{ fontSize: 20, color: '#6c63ff' }}>−</Text>
-                    </TouchableOpacity>
-                    <Text style={[styles.settingsItemStatus, theme.textSecondary, { marginHorizontal: 12, fontSize: fontSize }]}>
-                      {fontSize}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        const newSize = Math.min(24, fontSize + 2);
-                        setFontSize(newSize);
-                        saveFontSize(newSize);
-                      }}
-                      style={{ padding: 8 }}
-                    >
-                      <Text style={{ fontSize: 20, color: '#6c63ff' }}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {(currentUser?.role === 'ai_basic' ||
-                  currentUser?.role === 'ai_max' ||
-                  currentUser?.role === 'nemesis') && (
-                  <TouchableOpacity
-                    style={[styles.settingsItem, theme.border, { paddingVertical: 14 }]}
-                    onPress={exportChat}
-                  >
-                    <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📤 Экспорт чата</Text>
-                    <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>→</Text>
-                  </TouchableOpacity>
+                    }
+                  ]
                 )}
+              >
+                <Text style={[styles.profileButtonText, { color: '#ff4455', fontSize: fontSize }]}>🗑️ Удалить аккаунт</Text>
+              </TouchableOpacity>
 
-                <View style={[styles.settingsItem, theme.border]}>
-                  <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>ℹ️ О приложении</Text>
-                  <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>v2.1.0</Text>
-                </View>
+              <TouchableOpacity
+                style={[styles.profileButton, styles.profileButtonLogout, theme.card, { marginTop: 8 }]}
+                onPress={handleLogout}
+              >
+                <Text style={[styles.profileButtonText, styles.profileButtonTextLogout, { fontSize: fontSize }]}>🚪 Выйти</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        ) : (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
+            <View style={[styles.settingsCard, theme.card]}>
+              <Text style={[styles.settingsTitle, theme.text, { fontSize: fontSize + 4 }]}>⚙️ Настройки</Text>
 
-                <View style={[styles.settingsItem, theme.border]}>
-                  <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>👥 Команда</Text>
-                  <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>Kotik Team</Text>
-                </View>
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>🌙 Тёмная тема</Text>
+                <Switch
+                  value={isDarkTheme}
+                  onValueChange={toggleTheme}
+                  trackColor={{ false: '#767577', true: '#6c63ff' }}
+                  thumbColor={isDarkTheme ? '#fff' : '#f4f3f4'}
+                />
+              </View>
 
-                <View style={[styles.settingsItem, theme.border]}>
-                  <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📧 Поддержка</Text>
-                  <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>@Nemesissup</Text>
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📐 Размер текста</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const newSize = Math.max(12, fontSize - 2);
+                      setFontSize(newSize);
+                      saveFontSize(newSize);
+                    }}
+                    style={{ padding: 8 }}
+                  >
+                    <Text style={{ fontSize: 20, color: '#6c63ff' }}>−</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.settingsItemStatus, theme.textSecondary, { marginHorizontal: 12, fontSize: fontSize }]}>
+                    {fontSize}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const newSize = Math.min(24, fontSize + 2);
+                      setFontSize(newSize);
+                      saveFontSize(newSize);
+                    }}
+                    style={{ padding: 8 }}
+                  >
+                    <Text style={{ fontSize: 20, color: '#6c63ff' }}>+</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-            </ScrollView>
-          )}
 
-          <Modal
-            visible={showSettings}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={() => setShowSettings(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={[styles.modalContent, theme.card]}>
-                <Text style={[styles.modalTitle, theme.text, { fontSize: fontSize + 4 }]}>🔑 Активировать ключ</Text>
-                <Text style={[styles.modalSubtitle, theme.textSecondary, { fontSize: fontSize }]}>Введите ключ подписки</Text>
-
-                <TextInput
-                  style={[styles.modalInput, theme.input, { fontSize: fontSize }]}
-                  placeholder="Введите ключ..."
-                  placeholderTextColor={theme.placeholder}
-                  value={activateKeyInput}
-                  onChangeText={setActivateKeyInput}
-                  autoCapitalize="characters"
-                />
-
-                <TouchableOpacity onPress={activateKey} disabled={isActivating}>
-                  <LinearGradient colors={['#6c63ff', '#a78bfa']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modalButton}>
-                    <Text style={[styles.modalButtonText, { fontSize: fontSize }]}>
-                      {isActivating ? '⏳ Активация...' : '✅ Активировать'}
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-
+              {(currentUser?.role === 'ai_basic' ||
+                currentUser?.role === 'ai_max' ||
+                currentUser?.role === 'nemesis') && (
                 <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowSettings(false)}
+                  style={[styles.settingsItem, theme.border, { paddingVertical: 14 }]}
+                  onPress={exportChat}
                 >
-                  <Text style={[styles.modalCloseButtonText, theme.textSecondary, { fontSize: fontSize }]}>✕ Закрыть</Text>
+                  <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📤 Экспорт чата</Text>
+                  <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>→</Text>
                 </TouchableOpacity>
+              )}
+
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>ℹ️ О приложении</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>v2.1.0</Text>
+              </View>
+
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>👥 Команда</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>Kotik Team</Text>
+              </View>
+
+              <View style={[styles.settingsItem, theme.border]}>
+                <Text style={[styles.settingsItemLabel, theme.text, { fontSize: fontSize }]}>📧 Поддержка</Text>
+                <Text style={[styles.settingsItemStatus, theme.textSecondary, { fontSize: fontSize }]}>@Nemesissup</Text>
               </View>
             </View>
-          </Modal>
+          </ScrollView>
+        )}
 
-          <Modal
-            visible={!!previewHtml}
-            animationType="slide"
-            transparent={false}
-            onRequestClose={() => setPreviewHtml(null)}
-          >
-            <SafeAreaView style={{ flex: 1, backgroundColor: '#0d0d1a' }}>
-              <View style={styles.previewHeader}>
-                <Text style={styles.previewHeaderTitle}>▶ Просмотр</Text>
-                <TouchableOpacity onPress={() => setPreviewHtml(null)} style={styles.previewCloseBtn}>
-                  <Text style={{ color: '#fff', fontSize: 18 }}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              {previewHtml && (
-                <WebView originWhitelist={['*']} source={{ html: previewHtml }} style={{ flex: 1, backgroundColor: '#fff' }} />
-              )}
-            </SafeAreaView>
-          </Modal>
-        </SafeAreaView>
-      </SafeAreaProvider>
-    </ErrorBoundary>
+        <Modal
+          visible={showSettings}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowSettings(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, theme.card]}>
+              <Text style={[styles.modalTitle, theme.text, { fontSize: fontSize + 4 }]}>🔑 Активировать ключ</Text>
+              <Text style={[styles.modalSubtitle, theme.textSecondary, { fontSize: fontSize }]}>Введите ключ подписки</Text>
+
+              <TextInput
+                style={[styles.modalInput, theme.input, { fontSize: fontSize }]}
+                placeholder="Введите ключ..."
+                placeholderTextColor={theme.placeholder}
+                value={activateKeyInput}
+                onChangeText={setActivateKeyInput}
+                autoCapitalize="characters"
+              />
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={activateKey}
+                disabled={isActivating}
+              >
+                <Text style={[styles.modalButtonText, { fontSize: fontSize }]}>
+                  {isActivating ? '⏳ Активация...' : '✅ Активировать'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowSettings(false)}
+              >
+                <Text style={[styles.modalCloseButtonText, theme.textSecondary, { fontSize: fontSize }]}>✕ Закрыть</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 };
 
@@ -1621,21 +1431,17 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: 10, fontSize: 16 },
 
-  authContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 30, alignItems: 'center' },
-  authIconRing: { width: 64, height: 64, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
-  authIconText: { fontSize: 28, fontWeight: '800', color: '#fff' },
-  authTitle: { fontSize: 30, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
+  authContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 30 },
+  authTitle: { fontSize: 36, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
   authSubtitle: { fontSize: 14, textAlign: 'center', marginBottom: 30 },
-  authForm: { borderRadius: 20, padding: 24, borderWidth: 1, width: '100%' },
+  authForm: { borderRadius: 20, padding: 24, borderWidth: 1 },
   authFormTitle: { fontSize: 20, fontWeight: '600', textAlign: 'center', marginBottom: 20 },
   authInput: { borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 12, borderWidth: 1 },
-  authButton: { borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
+  authButton: { backgroundColor: '#6c63ff', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
   authButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   authLink: { fontSize: 14 },
 
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, gap: 8 },
-  headerIcon: { width: 30, height: 30, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 4 },
-  headerIconText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
   tabButton: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   tabButtonActive: { backgroundColor: 'rgba(108,99,255,0.15)' },
   tabText: { fontSize: 13, fontWeight: '500' },
@@ -1669,7 +1475,7 @@ const styles = StyleSheet.create({
   chatContainer: { flex: 1 },
   noChatsContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   noChatsText: { fontSize: 18, marginBottom: 20 },
-  createFirstChatButton: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  createFirstChatButton: { backgroundColor: '#6c63ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
   createFirstChatButtonText: { color: '#fff', fontWeight: '600' },
 
   chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
@@ -1694,11 +1500,9 @@ const styles = StyleSheet.create({
   timestamp: { fontSize: 9, marginTop: 4, textAlign: 'right' },
 
   codeBlock: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(108,99,255,0.15)', marginVertical: 6, overflow: 'hidden' },
-  codeBlockPending: { borderColor: 'rgba(108,99,255,0.4)' },
   codeBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(255,255,255,0.04)' },
   codeBlockLang: { color: '#6c63ff', fontSize: 10, fontWeight: '700' },
   codeBlockAction: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  codeBlockTyping: { color: '#8888aa', fontSize: 11 },
   codeBlockText: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, color: '#e0e0e0', padding: 10 },
 
   inputContainer: { padding: 12, borderTopWidth: 1 },
@@ -1706,7 +1510,7 @@ const styles = StyleSheet.create({
   attachButton: { padding: 12, borderRadius: 12, marginRight: 8, borderWidth: 1 },
   attachButtonText: { fontSize: 18 },
   input: { flex: 1, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, maxHeight: 100, fontSize: 15, borderWidth: 1 },
-  sendButton: { padding: 12, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  sendButton: { backgroundColor: 'rgba(108,99,255,0.15)', padding: 12, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(108,99,255,0.15)' },
   sendButtonDisabled: { opacity: 0.3 },
   sendButtonText: { fontSize: 20 },
 
@@ -1728,12 +1532,15 @@ const styles = StyleSheet.create({
   chatListItemText: { fontSize: 12, marginRight: 6 },
   chatListItemCount: { fontSize: 10 },
   createChatListButton: {
+    backgroundColor: 'rgba(108,99,255,0.15)',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
     marginLeft: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(108,99,255,0.2)',
   },
-  createChatListButtonText: { fontSize: 16, color: '#fff' },
+  createChatListButtonText: { fontSize: 16, color: '#6c63ff' },
 
   profileCard: { borderRadius: 20, padding: 24, borderWidth: 1 },
   profileTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
@@ -1760,14 +1567,10 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
   modalSubtitle: { fontSize: 14, textAlign: 'center', marginBottom: 24 },
   modalInput: { borderRadius: 12, padding: 14, fontSize: 16, marginBottom: 16, borderWidth: 1, textAlign: 'center', letterSpacing: 1 },
-  modalButton: { borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
+  modalButton: { backgroundColor: '#6c63ff', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
   modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   modalCloseButton: { alignItems: 'center', padding: 12 },
   modalCloseButtonText: { fontSize: 14 },
-
-  previewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
-  previewHeaderTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  previewCloseBtn: { padding: 6 },
 });
 
 export default App;
