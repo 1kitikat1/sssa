@@ -1,5 +1,8 @@
 platform :ios, '15.0'
 
+# Указываем проект
+project 'NemesisAI.xcodeproj'
+
 target 'NemesisAI' do
   use_frameworks!
   
