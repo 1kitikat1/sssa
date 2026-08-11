@@ -1,4 +1,3 @@
-# project.yml
 name: NemesisAI
 options:
   bundleIdPrefix: com.nemesis
