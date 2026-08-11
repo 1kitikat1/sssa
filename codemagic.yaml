@@ -1,35 +1,16 @@
 workflows:
-  ios-workflow:
-    name: iOS Build
+  ios-native-workflow:
+    name: iOS Native Build
     instance_type: mac_mini_m1
     max_build_duration: 60
     environment:
-      node: 20
       xcode: latest
       cocoapods: default
     cache:
       cache_paths:
-        - node_modules
         - ios/Pods
     scripts:
-      - name: Install dependencies
-        script: |
-          npm install
-
-      - name: Install Expo modules used by App.tsx
-        script: |
-          npx expo install expo-clipboard expo-linear-gradient react-native-webview
-
-      - name: Prebuild
-        script: |
-          npx expo prebuild --platform ios --clean
-
-      - name: Show available schemes (debug aid — check this if the build step fails)
-        script: |
-          cd ios
-          xcodebuild -list -workspace *.xcworkspace || xcodebuild -list -project *.xcodeproj
-
-      - name: Install Pods
+      - name: Install CocoaPods
         script: |
           cd ios && pod install && cd ..
 
@@ -38,10 +19,12 @@ workflows:
           set -e
           cd ios
 
+          # Определяем workspace и scheme
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
-          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          SCHEME="NemesisAI"
           echo "Using workspace: $WORKSPACE, scheme: $SCHEME"
 
+          # Сборка
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -51,23 +34,28 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath build
 
+          # Поиск .app
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
             APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
           fi
+          
           if [ -z "$APP_PATH" ]; then
-            echo "❌ .app bundle not found after build"
+            echo "❌ .app bundle not found"
             exit 1
           fi
+          
           echo "✅ App found: $APP_PATH"
 
+          # Создание IPA
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r NemesisAI.ipa Payload/
-
+          rm -rf Payload
+          
           mkdir -p ../build/ios
           mv NemesisAI.ipa ../build/ios/
-          rm -rf Payload
+          
           cd ..
     artifacts:
       - build/ios/NemesisAI.ipa
