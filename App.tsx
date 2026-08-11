@@ -26,6 +26,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
+  initializeAuth,
+  // @ts-ignore — getReactNativePersistence exists at runtime (firebase JS SDK >= 10.7) but isn't in older type defs
+  getReactNativePersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -49,7 +52,21 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+
+// getAuth(app) без persistence иногда ведёт себя нестабильно в скомпилированном
+// Hermes-бандле на iOS (в дев-режиме то же самое просто даёт варнинг в консоль).
+// initializeAuth + AsyncStorage — правильный способ для React Native.
+// try/catch нужен, потому что initializeAuth падает, если его вызвать дважды
+// (например при Fast Refresh) — тогда просто берём уже созданный инстанс.
+let auth: ReturnType<typeof getAuth>;
+try {
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage),
+  });
+} catch (e) {
+  auth = getAuth(app);
+}
+
 const database = getDatabase(app);
 
 // ============================================================
@@ -306,6 +323,43 @@ const TypingDots: React.FC = () => {
 // ============================================================
 //  ОСНОВНОЙ КОМПОНЕНТ
 // ============================================================
+// ============================================================
+//  ERROR BOUNDARY — если что-то упадёт при рендере, показываем текст
+//  ошибки вместо тихого белого экрана (это то, чего сейчас не хватает).
+// ============================================================
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('❌ Nemesis AI crashed:', error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <SafeAreaProvider>
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#07070d', padding: 20, justifyContent: 'center' }}>
+            <Text style={{ color: '#ff4455', fontSize: 16, fontWeight: '700', marginBottom: 10 }}>
+              ⚠ Произошла ошибка
+            </Text>
+            <Text style={{ color: '#8888aa', fontSize: 13 }}>
+              {this.state.error.message}
+            </Text>
+          </SafeAreaView>
+        </SafeAreaProvider>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const App = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
