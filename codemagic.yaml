@@ -15,16 +15,24 @@ workflows:
         script: |
           brew install xcodegen
 
+      - name: Clean up
+        script: |
+          rm -rf NemesisAI.xcodeproj
+          rm -rf NemesisAI.xcworkspace
+          rm -rf build
+
       - name: Check files
         script: |
-          echo "📁 Files in root:"
+          echo "📁 Current directory:"
           ls -la
-          echo "📁 Checking App.swift..."
-          cat App.swift | head -5 || echo "❌ App.swift not found!"
 
       - name: Generate Xcode project
         script: |
           xcodegen generate
+
+      - name: List generated project
+        script: |
+          ls -la NemesisAI.xcodeproj/
 
       - name: Install Pods
         script: |
@@ -49,7 +57,8 @@ workflows:
             -sdk iphoneos \
             -arch arm64 \
             CODE_SIGNING_ALLOWED=NO \
-            -derivedDataPath build
+            -derivedDataPath build \
+            -skipMacroValidation
 
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -1)
           
