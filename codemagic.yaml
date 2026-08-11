@@ -1,52 +1,80 @@
-scripts:
-  - name: Install xcodegen
-    script: |
-      brew install xcodegen
+workflows:
+  ios-native:
+    name: iOS Native Build
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      xcode: latest
+      cocoapods: default
+    cache:
+      cache_paths:
+        - ~/.cocoapods
+        - Pods
+    scripts:
+      - name: Install xcodegen
+        script: |
+          brew install xcodegen
 
-  - name: Generate Xcode project
-    script: |
-      xcodegen generate
+      - name: Check files
+        script: |
+          echo "📁 Current directory:"
+          ls -la
+          echo "📁 Checking if App.swift exists:"
+          ls -la NemesisAI/App.swift || echo "❌ App.swift not found in NemesisAI/"
 
-  - name: Install Pods
-    script: |
-      pod install
+      - name: Generate Xcode project
+        script: |
+          xcodegen generate
 
-  - name: Build IPA
-    script: |
-      set -e
-      
-      # Находим workspace
-      WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
-      if [ -z "$WORKSPACE" ]; then
-        echo "❌ Workspace not found!"
-        exit 1
-      fi
-      
-      echo "📦 Using workspace: $WORKSPACE"
+      - name: List generated project
+        script: |
+          ls -la NemesisAI.xcodeproj/
 
-      xcodebuild \
-        -workspace "$WORKSPACE" \
-        -scheme NemesisAI \
-        -configuration Release \
-        -sdk iphoneos \
-        -arch arm64 \
-        CODE_SIGNING_ALLOWED=NO \
-        -derivedDataPath build
+      - name: Install Pods
+        script: |
+          pod install
 
-      APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -1)
-      
-      if [ -z "$APP_PATH" ]; then
-        echo "❌ App not found!"
-        exit 1
-      fi
+      - name: List workspace
+        script: |
+          ls -la *.xcworkspace || echo "❌ No workspace found"
 
-      echo "✅ App found: $APP_PATH"
+      - name: Build IPA
+        script: |
+          set -e
+          
+          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+          if [ -z "$WORKSPACE" ]; then
+            echo "❌ Workspace not found!"
+            exit 1
+          fi
+          
+          echo "📦 Using workspace: $WORKSPACE"
 
-      mkdir -p Payload
-      cp -r "$APP_PATH" Payload/
-      zip -r NemesisAI.ipa Payload/
-      
-      mkdir -p build/ios
-      mv NemesisAI.ipa build/ios/
-      
-      echo "✅ Build complete!"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme NemesisAI \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath build
+
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ App not found!"
+            exit 1
+          fi
+
+          echo "✅ App found: $APP_PATH"
+
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r NemesisAI.ipa Payload/
+          
+          mkdir -p build/ios
+          mv NemesisAI.ipa build/ios/
+          
+          echo "✅ Build complete!"
+    artifacts:
+      - build/ios/NemesisAI.ipa
