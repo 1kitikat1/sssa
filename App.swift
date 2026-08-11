@@ -9,13 +9,22 @@ import SwiftUI
 import Firebase
 import FirebaseAuth
 import FirebaseDatabase
-import Combine
-import UIKit
 
 // MARK: - App Delegate
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        FirebaseApp.configure()
+        
+        // 👇 Firebase конфигурация БЕЗ GoogleService-Info.plist
+        let firebaseConfig = FirebaseOptions(
+            googleAppID: "1:649763368476:ios:de4e044d4d971168fa79d9",
+            gcmSenderID: "649763368476"
+        )
+        firebaseConfig.apiKey = "AIzaSyA47KFVXVAXEjIkwCqbkwM7yLUGUco8ov8"
+        firebaseConfig.projectID = "nemesissteam-13577"
+        firebaseConfig.databaseURL = "https://nemesissteam-13577-default-rtdb.firebaseio.com"
+        firebaseConfig.storageBucket = "nemesissteam-13577.firebasestorage.app"
+        
+        FirebaseApp.configure(options: firebaseConfig)
         return true
     }
 }
@@ -420,15 +429,11 @@ struct AuthView: View {
                 return
             }
             authManager.signUp(email: email, password: password, username: username) { success in
-                if !success {
-                    // show error
-                }
+                if !success {}
             }
         } else {
             authManager.signIn(email: email, password: password) { success in
-                if !success {
-                    // show error
-                }
+                if !success {}
             }
         }
     }
@@ -470,7 +475,6 @@ struct HomeView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 30) {
-                    // Hero
                     VStack(spacing: 12) {
                         Text("NEMESIS :3")
                             .font(.system(size: 44, weight: .black))
@@ -484,7 +488,6 @@ struct HomeView: View {
                     }
                     .padding(.top, 20)
                     
-                    // Продукты
                     VStack(spacing: 16) {
                         Text("ПРОДУКТЫ")
                             .font(.title2)
@@ -510,7 +513,6 @@ struct HomeView: View {
                         .padding(.horizontal)
                     }
                     
-                    // Тарифы
                     VStack(spacing: 16) {
                         Text("ВЫБЕРИ ТАРИФ")
                             .font(.title2)
@@ -560,7 +562,6 @@ struct HomeView: View {
                         .padding(.horizontal)
                     }
                     
-                    // Активация ключа
                     VStack(spacing: 12) {
                         Text("🎁 Есть ключ? Активируй!")
                             .font(.headline)
@@ -835,7 +836,6 @@ struct ChatView: View {
         inputText = ""
         isSending = true
         
-        // Имитация ответа AI
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             let assistantMessage = Message(
                 role: .assistant,
@@ -898,7 +898,6 @@ struct ProfileView: View {
         NavigationView {
             VStack(spacing: 24) {
                 if let user = authManager.currentUser {
-                    // Аватар
                     Circle()
                         .fill(
                             LinearGradient(
@@ -915,18 +914,15 @@ struct ProfileView: View {
                                 .foregroundColor(.white)
                         )
                     
-                    // Имя
                     Text(user.username)
                         .font(.title2)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                     
-                    // Email
                     Text(user.email)
                         .font(.subheadline)
                         .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
                     
-                    // Роль
                     Text(user.role.displayName)
                         .font(.headline)
                         .padding(.horizontal, 16)
@@ -935,7 +931,6 @@ struct ProfileView: View {
                         .foregroundColor(user.role.color)
                         .cornerRadius(20)
                     
-                    // Статистика
                     HStack(spacing: 30) {
                         VStack {
                             Text("\(user.role.maxTokens)")
@@ -961,7 +956,6 @@ struct ProfileView: View {
                     .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
                     .cornerRadius(16)
                     
-                    // Генерация ключей (только для NEMESIS)
                     if user.role.canGenerateKeys {
                         Button(action: generateKey) {
                             HStack {
@@ -977,7 +971,6 @@ struct ProfileView: View {
                         .padding(.horizontal)
                     }
                     
-                    // Выход
                     Button(action: {
                         authManager.signOut()
                     }) {
