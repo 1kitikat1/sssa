@@ -13,9 +13,11 @@ targets:
           - "*.yaml"
           - "codemagic.yaml"
           - "*.md"
+          - "Podfile"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nemesis.ai
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: 5.0
         INFOPLIST_FILE: Info.plist
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: YES
