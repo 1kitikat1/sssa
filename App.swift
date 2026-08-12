@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import PhotosUI
 import Firebase
 import FirebaseAuth
 import FirebaseDatabase
@@ -282,8 +281,6 @@ enum UserRole: String {
         return self == .nemesis
     }
 
-    var canUseVision: Bool { true }
-
     var color: Color {
         switch self {
         case .free: return .gray
@@ -321,7 +318,7 @@ struct ChatSession: Identifiable, Equatable {
     }
 }
 
-// MARK: - AI Service (настоящий построчный стриминг через URLSession.bytes)
+// MARK: - AI Service
 class AIService {
     static let shared = AIService()
 
@@ -398,7 +395,6 @@ class AIService {
         return StreamResult(text: fullText, finishReason: finishReason)
     }
 
-    // ===== ЗАГРУЗКА ФОТО (imgbb, тот же провайдер что на сайте и в мобильном приложении) =====
     func uploadImage(_ image: UIImage) async throws -> String {
         guard let jpegData = image.jpegData(compressionQuality: 0.6) else {
             throw NSError(domain: "Upload", code: -1, userInfo: [NSLocalizedDescriptionKey: "Не удалось подготовить фото"])
@@ -432,7 +428,7 @@ class AIService {
     }
 }
 
-// MARK: - Chat Manager (мультичат + стриминг + авто-продолжение при обрыве)
+// MARK: - Chat Manager
 @MainActor
 class ChatManager: ObservableObject {
     @Published var chats: [ChatSession] = []
@@ -598,7 +594,7 @@ class ChatManager: ObservableObject {
                             self.messages[idx].content = fullResponse
                         }
                     })
-                    streamImage = nil // фото повторно не шлём в продолжениях
+                    streamImage = nil
 
                     if result.finishReason != "length" || attempt >= maxContinuations { break }
                     attempt += 1
@@ -617,6 +613,40 @@ class ChatManager: ObservableObject {
             }
 
             isSending = false
+        }
+    }
+}
+
+// MARK: - Image Picker (iOS 15 совместимый)
+struct ImagePicker: UIViewControllerRepresentable {
+    @Binding var image: UIImage?
+    @Environment(\.presentationMode) var presentationMode
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.sourceType = .photoLibrary
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: ImagePicker
+
+        init(_ parent: ImagePicker) {
+            self.parent = parent
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.image = image
+            }
+            parent.presentationMode.wrappedValue.dismiss()
         }
     }
 }
@@ -779,7 +809,7 @@ struct AuthView: View {
     }
 }
 
-// MARK: - Main Tab View (Главная / Профиль / Настройки)
+// MARK: - Main Tab View
 struct MainTabView: View {
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var chatManager = ChatManager()
@@ -788,7 +818,7 @@ struct MainTabView: View {
         TabView {
             ChatHomeView()
                 .environmentObject(chatManager)
-                .tabItem { Label("Главная", systemImage: "message.fill") }
+                .tabItem { Label("Чат", systemImage: "message.fill") }
 
             ProfileView()
                 .environmentObject(chatManager)
@@ -813,14 +843,14 @@ struct MainTabView: View {
     }
 }
 
-// MARK: - Chat Home View (главная = сам чат, как у других ИИ-приложений)
+// MARK: - Chat Home View
 struct ChatHomeView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var chatManager: ChatManager
 
     @State private var inputText = ""
     @State private var showChatList = false
-    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showImagePicker = false
     @State private var selectedImage: UIImage?
 
     var body: some View {
@@ -870,7 +900,7 @@ struct ChatHomeView: View {
                             .font(.caption)
                             .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
                         Spacer()
-                        Button(action: { withAnimation { selectedImage = nil; selectedPhotoItem = nil } }) {
+                        Button(action: { withAnimation { selectedImage = nil } }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(Color(red: 255/255, green: 68/255, blue: 68/255))
                         }
@@ -880,7 +910,7 @@ struct ChatHomeView: View {
                 }
 
                 HStack(spacing: 12) {
-                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Button(action: { showImagePicker = true }) {
                         Image(systemName: "paperclip")
                             .font(.title3)
                             .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
@@ -946,15 +976,8 @@ struct ChatHomeView: View {
                 ChatListSheet()
                     .environmentObject(chatManager)
             }
-            .onChange(of: selectedPhotoItem) { newItem in
-                Task {
-                    if let data = try? await newItem?.loadTransferable(type: Data.self),
-                       let uiImage = UIImage(data: data) {
-                        await MainActor.run {
-                            withAnimation { selectedImage = uiImage }
-                        }
-                    }
-                }
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(image: $selectedImage)
             }
         }
     }
@@ -968,12 +991,11 @@ struct ChatHomeView: View {
         inputText = ""
         withAnimation {
             selectedImage = nil
-            selectedPhotoItem = nil
         }
     }
 }
 
-// MARK: - Chat List Sheet (выбор / создание / удаление чатов)
+// MARK: - Chat List Sheet
 struct ChatListSheet: View {
     @EnvironmentObject var chatManager: ChatManager
     @Environment(\.dismiss) var dismiss
@@ -1033,7 +1055,7 @@ struct ChatListSheet: View {
     }
 }
 
-// MARK: - Typing Dots (анимированный индикатор "печатает")
+// MARK: - Typing Dots
 struct TypingDotsView: View {
     @State private var animate = false
 
