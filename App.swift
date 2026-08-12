@@ -555,27 +555,34 @@ class ChatManager: ObservableObject {
             let userContent = trimmed.isEmpty ? "📸 Фото" : trimmed
             let now = Date().timeIntervalSince1970
             let userRef = chatMessagesRef.childByAutoId()
-            userRef.setValue([
+            
+            await userRef.setValue([
                 "role": "user",
                 "content": userContent,
                 "timestamp": now,
                 "imageUrl": imageUrl as Any
             ])
-            chatRef.updateChildValues(["updated_at": now])
+            
+            await chatRef.updateChildValues(["updated_at": now])
 
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                messages.append(Message(id: userRef.key ?? UUID().uuidString, role: .user, content: userContent, imageUrl: imageUrl, timestamp: now))
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    messages.append(Message(id: userRef.key ?? UUID().uuidString, role: .user, content: userContent, imageUrl: imageUrl, timestamp: now))
+                }
             }
 
             let history: [[String: Any]] = messages.map { ["role": $0.role == .user ? "user" : "assistant", "content": $0.content] }
 
             let assistantRef = chatMessagesRef.childByAutoId()
             let assistantTimestamp = Date().timeIntervalSince1970
-            assistantRef.setValue(["role": "assistant", "content": "", "timestamp": assistantTimestamp])
+            
+            await assistantRef.setValue(["role": "assistant", "content": "", "timestamp": assistantTimestamp])
             let assistantId = assistantRef.key ?? UUID().uuidString
 
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                messages.append(Message(id: assistantId, role: .assistant, content: "", imageUrl: nil, timestamp: assistantTimestamp))
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    messages.append(Message(id: assistantId, role: .assistant, content: "", imageUrl: nil, timestamp: assistantTimestamp))
+                }
             }
 
             var fullResponse = ""
@@ -589,9 +596,13 @@ class ChatManager: ObservableObject {
                     let result = try await AIService.shared.streamChat(messages: convo, imageUrl: streamImage, role: role, onChunk: { [weak self] chunk in
                         guard let self = self else { return }
                         fullResponse += chunk
-                        assistantRef.updateChildValues(["content": fullResponse])
+                        Task {
+                            await assistantRef.updateChildValues(["content": fullResponse])
+                        }
                         if let idx = self.messages.firstIndex(where: { $0.id == assistantId }) {
-                            self.messages[idx].content = fullResponse
+                            Task { @MainActor in
+                                self.messages[idx].content = fullResponse
+                            }
                         }
                     })
                     streamImage = nil
@@ -604,15 +615,19 @@ class ChatManager: ObservableObject {
                     ]
                 } catch {
                     let errText = "⚠️ Не удалось получить ответ: \(error.localizedDescription)"
-                    assistantRef.updateChildValues(["content": errText])
+                    await assistantRef.updateChildValues(["content": errText])
                     if let idx = messages.firstIndex(where: { $0.id == assistantId }) {
-                        messages[idx].content = errText
+                        await MainActor.run {
+                            messages[idx].content = errText
+                        }
                     }
                     break
                 }
             }
 
-            isSending = false
+            await MainActor.run {
+                isSending = false
+            }
         }
     }
 }
