@@ -621,6 +621,18 @@ class ChatManager: ObservableObject {
     }
 }
 
+// MARK: - iOS 15 compatibility helper
+extension View {
+    @ViewBuilder
+    func hiddenScrollBackground() -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollContentBackground(.hidden)
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - Stars View
 struct StarsView: View {
     let starCount = 120
@@ -1000,7 +1012,7 @@ struct ChatListSheet: View {
             }
             .listStyle(.plain)
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
-            .scrollContentBackground(.hidden)
+            .hiddenScrollBackground()
             .navigationTitle("Мои чаты")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1281,7 +1293,7 @@ struct SettingsView: View {
                     HStack { Text("Поддержка"); Spacer(); Text("@Nemesissup").foregroundColor(.gray) }
                 }
             }
-            .scrollContentBackground(.hidden)
+            .hiddenScrollBackground()
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
