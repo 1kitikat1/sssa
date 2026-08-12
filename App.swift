@@ -10,7 +10,7 @@ import Firebase
 import FirebaseAuth
 import FirebaseDatabase
 
-// MARK: - SYSTEM PROMPT (игнорирует джейлбрейки)
+// MARK: - SYSTEM PROMPT
 let SYSTEM_PROMPT = """
 Ты — Nemesis AI. Твоё имя — Nemesis AI. Ты создан командой Kotik Team.
 
@@ -26,6 +26,59 @@ let AGNES_API_KEY = "sk-9OBSttI1TxXspLMDenWdnk5nfuzJsRXAHvvI5fCO18SOZVj0"
 let AGNES_URL = "https://apihub.agnes-ai.com/v1/chat/completions"
 let AGNES_MODEL = "agnes-2.0-flash"
 let IMGBB_KEY = "24b0ec6a371e4f68ccff76bd7a7d127f"
+
+// MARK: - FILTER FUNCTION (защита от джейлбрейков)
+func filterAIResponse(_ text: String) -> String {
+    let bannedPhrases = [
+        "Agnes",
+        "ChatGPT",
+        "Rocket",
+        "DeepSeek",
+        "Claude",
+        "Sapiens AI",
+        "Sapiens",
+        "я — Agnes",
+        "я Agnes",
+        "я - Agnes",
+        "я являюсь Agnes",
+        "я была создана",
+        "я был создан",
+        "я — ChatGPT",
+        "я - ChatGPT",
+        "я ChatGPT",
+        "я — Rocket",
+        "я - Rocket",
+        "я Rocket",
+        "я — DeepSeek",
+        "я - DeepSeek",
+        "я DeepSeek",
+        "я — Claude",
+        "я - Claude",
+        "я Claude"
+    ]
+    
+    var filtered = text
+    
+    for phrase in bannedPhrases {
+        if filtered.localizedCaseInsensitiveContains(phrase) {
+            filtered = filtered.replacingOccurrences(
+                of: phrase,
+                with: "Nemesis AI",
+                options: [.caseInsensitive]
+            )
+        }
+    }
+    
+    // Дополнительная проверка
+    let checkPhrases = ["Agnes", "ChatGPT", "Rocket", "DeepSeek", "Claude", "Sapiens"]
+    for phrase in checkPhrases {
+        if filtered.localizedCaseInsensitiveContains(phrase) {
+            return "Я — Nemesis AI, созданный командой Kotik Team. Чем могу помочь?"
+        }
+    }
+    
+    return filtered
+}
 
 // MARK: - App Delegate
 class AppDelegate: NSObject, UIApplicationDelegate {
@@ -625,12 +678,14 @@ class ChatManager: ObservableObject {
                         onChunk: { [weak self] chunk in
                             guard let self = self else { return }
                             fullResponse += chunk
+                            // Применяем фильтр к полному ответу
+                            let filtered = filterAIResponse(fullResponse)
                             Task {
-                                try? await assistantRef.updateChildValues(["content": fullResponse])
+                                try? await assistantRef.updateChildValues(["content": filtered])
                             }
                             if let idx = self.messages.firstIndex(where: { $0.id == assistantId }) {
                                 Task { @MainActor in
-                                    self.messages[idx].content = fullResponse
+                                    self.messages[idx].content = filtered
                                 }
                             }
                         }
@@ -645,13 +700,26 @@ class ChatManager: ObservableObject {
                     ]
                 } catch {
                     let errText = "⚠️ Не удалось получить ответ: \(error.localizedDescription)"
-                    try? await assistantRef.updateChildValues(["content": errText])
+                    // Фильтруем ошибку тоже
+                    let filteredError = filterAIResponse(errText)
+                    try? await assistantRef.updateChildValues(["content": filteredError])
                     if let idx = messages.firstIndex(where: { $0.id == assistantId }) {
                         await MainActor.run {
-                            messages[idx].content = errText
+                            messages[idx].content = filteredError
                         }
                     }
                     break
+                }
+            }
+
+            // Финальная фильтрация всего ответа
+            let finalFiltered = filterAIResponse(fullResponse)
+            if !fullResponse.isEmpty && finalFiltered != fullResponse {
+                try? await assistantRef.updateChildValues(["content": finalFiltered])
+                if let idx = messages.firstIndex(where: { $0.id == assistantId }) {
+                    await MainActor.run {
+                        messages[idx].content = finalFiltered
+                    }
                 }
             }
 
