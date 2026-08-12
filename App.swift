@@ -1,10 +1,3 @@
-//
-//  App.swift
-//  NemesisAI
-//
-//  Created by Kotik Team
-//
-
 import SwiftUI
 import Firebase
 import FirebaseAuth
@@ -14,7 +7,6 @@ import FirebaseDatabase
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         
-        // 👇 Firebase конфигурация БЕЗ GoogleService-Info.plist
         let firebaseConfig = FirebaseOptions(
             googleAppID: "1:649763368476:ios:de4e044d4d971168fa79d9",
             gcmSenderID: "649763368476"
@@ -839,7 +831,7 @@ struct ChatView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             let assistantMessage = Message(
                 role: .assistant,
-                content: "Это тестовый ответ от Nemesis AI. В реальном приложении здесь будет ответ от нейросети! 😊",
+                content: "Ответ от Nemesis AI! 😊",
                 imageUrl: nil,
                 timestamp: Date().timeIntervalSince1970
             )
