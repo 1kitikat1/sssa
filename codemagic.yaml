@@ -5,7 +5,16 @@ workflows:
     max_build_duration: 60
     environment:
       xcode: latest
+      cocoapods: default
+    cache:
+      cache_paths:
+        - ~/.cocoapods
+        - Pods
     scripts:
+      - name: Install xcodegen
+        script: |
+          brew install xcodegen
+
       - name: Create Info.plist
         script: |
           cat > Info.plist << 'EOF'
@@ -16,15 +25,15 @@ workflows:
             <key>CFBundleDevelopmentRegion</key>
             <string>$(DEVELOPMENT_LANGUAGE)</string>
             <key>CFBundleExecutable</key>
-            <string>NemesisAI</string>
+            <string>$(EXECUTABLE_NAME)</string>
             <key>CFBundleIdentifier</key>
-            <string>com.nemesis.ai</string>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>CFBundleName</key>
-            <string>NemesisAI</string>
+            <string>$(PRODUCT_NAME)</string>
             <key>CFBundlePackageType</key>
-            <string>APPL</string>
+            <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
             <key>CFBundleShortVersionString</key>
             <string>1.0</string>
             <key>CFBundleVersion</key>
@@ -47,52 +56,9 @@ workflows:
           </plist>
           EOF
 
-      - name: Create Xcode project
+      - name: Generate Xcode project
         script: |
-          mkdir -p NemesisAI.xcodeproj
-          
-          cat > NemesisAI.xcodeproj/project.pbxproj << 'EOF'
-          // !$*UTF8*$!
-          {
-            archiveVersion = 1;
-            classes = {};
-            objectVersion = 56;
-            objects = {
-              APP_FILE = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
-              INFO_FILE = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-              PRODUCT_APP = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NemesisAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
-              MAIN_GROUP = {isa = PBXGroup; children = (APP_FILE, INFO_FILE); sourceTree = "<group>"; };
-              PROJECT_ROOT = {isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500;}; buildConfigurationList = BUILD_LIST; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en); mainGroup = MAIN_GROUP; productRefGroup = PRODUCTS_GROUP; projectDirPath = ""; projectRoot = ""; targets = (NEMESIS_TARGET); };
-              PRODUCTS_GROUP = {isa = PBXGroup; children = (PRODUCT_APP); name = Products; sourceTree = "<group>"; };
-              SOURCES_PHASE = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({isa = PBXBuildFile; fileRef = APP_FILE;}); runOnlyForDeploymentPostprocessing = 0; };
-              RESOURCES_PHASE = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-              FRAMEWORKS_PHASE = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-              DEBUG_CONFIG = {isa = XCBuildConfiguration; buildSettings = {
-                IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-                PRODUCT_BUNDLE_IDENTIFIER = com.nemesis.ai;
-                INFOPLIST_FILE = Info.plist;
-                PRODUCT_NAME = NemesisAI;
-                CODE_SIGN_STYLE = Automatic;
-                SWIFT_VERSION = 5.0;
-                SDKROOT = iphoneos;
-                TARGETED_DEVICE_FAMILY = "1,2";
-              }; name = Debug; };
-              RELEASE_CONFIG = {isa = XCBuildConfiguration; buildSettings = {
-                IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-                PRODUCT_BUNDLE_IDENTIFIER = com.nemesis.ai;
-                INFOPLIST_FILE = Info.plist;
-                PRODUCT_NAME = NemesisAI;
-                CODE_SIGN_STYLE = Automatic;
-                SWIFT_VERSION = 5.0;
-                SDKROOT = iphoneos;
-                TARGETED_DEVICE_FAMILY = "1,2";
-              }; name = Release; };
-              BUILD_LIST = {isa = XCConfigurationList; buildConfigurations = (DEBUG_CONFIG, RELEASE_CONFIG); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
-              NEMESIS_TARGET = {isa = PBXNativeTarget; buildConfigurationList = BUILD_LIST; buildPhases = (SOURCES_PHASE, RESOURCES_PHASE, FRAMEWORKS_PHASE); dependencies = (); name = NemesisAI; productName = NemesisAI; productReference = PRODUCT_APP; productType = "com.apple.product-type.application";};
-            };
-            rootObject = PROJECT_ROOT;
-          }
-          EOF
+          xcodegen generate
 
       - name: Build IPA
         script: |
@@ -114,11 +80,15 @@ workflows:
             exit 1
           fi
 
+          echo "✅ App found: $APP_PATH"
+
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r NemesisAI.ipa Payload/
           
           mkdir -p build/ios
           mv NemesisAI.ipa build/ios/
+          
+          echo "✅ Build complete!"
     artifacts:
       - build/ios/NemesisAI.ipa
