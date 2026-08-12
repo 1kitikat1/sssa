@@ -86,7 +86,6 @@ struct NemesisAIApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(authManager)
-                .preferredColorScheme(.dark)
         }
     }
 }
@@ -399,20 +398,17 @@ class AIService {
         switch mode {
         case .standard:
             temperature = 0.5
-            // Стандартный промпт
 
         case .reasoning:
             temperature = 0.3
-            // Добавляем инструкцию о пошаговом объяснении
             systemPrompt = SYSTEM_PROMPT + "\n\nВажно: Сначала дай краткое пошаговое объяснение своего рассуждения (1-2 предложения), затем — полный ответ."
 
         case .fast:
             temperature = 0.8
-            maxTokens = min(maxTokens, 500) // Урезаем токены для скорости
+            maxTokens = min(maxTokens, 500)
             systemPrompt = SYSTEM_PROMPT + "\n\nВажно: Отвечай максимально кратко и по делу. Без лишней воды."
         }
 
-        // Обновляем системное сообщение
         formattedMessages[0]["content"] = systemPrompt
 
         let requestBody: [String: Any] = [
@@ -871,7 +867,6 @@ struct AuthView: View {
                     .cornerRadius(12)
                     .disabled(authManager.isLoading)
 
-                    // ✅ Исправлено: .contentShape(Rectangle()) для всей области
                     Button(action: { withAnimation { isRegister.toggle() } }) {
                         Text(isRegister ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться")
                             .font(.subheadline)
@@ -919,6 +914,9 @@ struct MainTabView: View {
     @StateObject private var chatManager = ChatManager()
     @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
+    
+    @State private var showEasterEgg = false
+    @State private var easterEggText = ""
 
     var body: some View {
         TabView {
@@ -948,6 +946,16 @@ struct MainTabView: View {
                 chatManager.detach()
             }
         }
+        // 🥚 ПАСХАЛКА: 5 нажатий на логотип NEMESIS
+        .onTapGesture(count: 5) {
+            showEasterEgg = true
+            easterEggText = "🐱 КОТИК TEAM 🐱\n\nNemesis AI создан с любовью ❤️\nВерсия: 2.1.0\n\n🍪 Спасибо, что ты с нами!"
+        }
+        .alert("🥚 Пасхалка!", isPresented: $showEasterEgg) {
+            Button("Круто! 🎉") { }
+        } message: {
+            Text(easterEggText)
+        }
     }
 
     var colorScheme: ColorScheme? {
@@ -970,8 +978,6 @@ struct ChatHomeView: View {
     @State private var showChatList = false
     @State private var showImagePicker = false
     @State private var selectedImage: UIImage?
-
-    // ✅ Удалено: showingDeleteConfirmation и chatToDelete — перенесены в ChatListSheet
 
     var body: some View {
         NavigationView {
@@ -1142,13 +1148,25 @@ struct ChatHomeView: View {
     // MARK: - Локализация
     func localizedText(_ text: String) -> String {
         let currentLang = AppLanguage(rawValue: language) ?? .system
-        // Для простоты пока возвращаем как есть
-        // В будущем можно добавить реальную локализацию
+        
+        // Простая локализация для демонстрации
+        if currentLang == .en {
+            let dict: [String: String] = [
+                "Начните разговор с Nemesis AI": "Start a conversation with Nemesis AI",
+                "Напиши сообщение...": "Type a message...",
+                "Фото прикреплено": "Photo attached",
+                "Стандартный": "Standard",
+                "Рассуждение": "Reasoning",
+                "Быстрый": "Fast"
+            ]
+            return dict[text] ?? text
+        }
+        
         return text
     }
 }
 
-// MARK: - Chat List Sheet (с подтверждением удаления внутри)
+// MARK: - Chat List Sheet
 struct ChatListSheet: View {
     @EnvironmentObject var chatManager: ChatManager
     @Environment(\.dismiss) var dismiss
@@ -1517,6 +1535,11 @@ struct SettingsView: View {
     @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
     @AppStorage("nemesis_font_size") private var fontSize: Double = 16
+    
+    // Для пасхалки с нажатиями на версию
+    @State private var versionTapCount = 0
+    @State private var showEasterEgg = false
+    @State private var easterEggText = ""
 
     var body: some View {
         NavigationView {
@@ -1529,7 +1552,14 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: theme) { _ in
-                        UIApplication.shared.windows.first?.rootViewController?.setNeedsStatusBarAppearanceUpdate()
+                        // Принудительно обновляем интерфейс
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            windowScene.windows.forEach { window in
+                                window.rootViewController?.setNeedsStatusBarAppearanceUpdate()
+                            }
+                        }
+                        // Уведомляем систему о смене темы
+                        UIApplication.shared.windows.first?.rootViewController?.view.setNeedsDisplay()
                     }
                 }
 
@@ -1540,6 +1570,14 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: language) { _ in
+                        // Перезагружаем интерфейс для применения языка
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            windowScene.windows.forEach { window in
+                                window.rootViewController?.setNeedsStatusBarAppearanceUpdate()
+                            }
+                        }
+                    }
                 }
 
                 Section(header: Text("Внешний вид").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
@@ -1553,7 +1591,21 @@ struct SettingsView: View {
                 }
 
                 Section(header: Text("О приложении").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
-                    HStack { Text("Версия"); Spacer(); Text("2.1.0").foregroundColor(.gray) }
+                    HStack { 
+                        Text("Версия")
+                        Spacer()
+                        // 🥚 Пасхалка: двойное нажатие на версию
+                        Text("2.1.0")
+                            .foregroundColor(.gray)
+                            .onTapGesture(count: 5) {
+                                versionTapCount += 1
+                                if versionTapCount >= 5 {
+                                    showEasterEgg = true
+                                    easterEggText = "🐱 КОТИК TEAM 🐱\n\nNemesis AI создан с любовью ❤️\nВерсия: 2.1.0\n\n🍪 Спасибо, что ты с нами!\n\n🔥 Kotik Team — лучшая команда!"
+                                    versionTapCount = 0
+                                }
+                            }
+                    }
                     HStack { Text("Команда"); Spacer(); Text("Kotik Team").foregroundColor(.gray) }
                     HStack { Text("Поддержка"); Spacer(); Text("@Nemesissup").foregroundColor(.gray) }
                 }
@@ -1567,6 +1619,13 @@ struct SettingsView: View {
                         .font(.headline)
                         .foregroundColor(.white)
                 }
+            }
+            .alert("🥚 Пасхалка!", isPresented: $showEasterEgg) {
+                Button("Круто! 🎉") {
+                    showEasterEgg = false
+                }
+            } message: {
+                Text(easterEggText)
             }
         }
     }
