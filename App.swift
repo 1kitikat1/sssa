@@ -27,38 +27,18 @@ let AGNES_URL = "https://apihub.agnes-ai.com/v1/chat/completions"
 let AGNES_MODEL = "agnes-2.0-flash"
 let IMGBB_KEY = "24b0ec6a371e4f68ccff76bd7a7d127f"
 
-// MARK: - FILTER FUNCTION (защита от джейлбрейков)
+// MARK: - FILTER FUNCTION
 func filterAIResponse(_ text: String) -> String {
     let bannedPhrases = [
-        "Agnes",
-        "ChatGPT",
-        "Rocket",
-        "DeepSeek",
-        "Claude",
-        "Sapiens AI",
-        "Sapiens",
-        "я — Agnes",
-        "я Agnes",
-        "я - Agnes",
-        "я являюсь Agnes",
-        "я была создана",
-        "я был создан",
-        "я — ChatGPT",
-        "я - ChatGPT",
-        "я ChatGPT",
-        "я — Rocket",
-        "я - Rocket",
-        "я Rocket",
-        "я — DeepSeek",
-        "я - DeepSeek",
-        "я DeepSeek",
-        "я — Claude",
-        "я - Claude",
-        "я Claude"
+        "Agnes", "ChatGPT", "Rocket", "DeepSeek", "Claude",
+        "Sapiens AI", "Sapiens",
+        "я — Agnes", "я Agnes", "я - Agnes", "я являюсь Agnes",
+        "я была создана", "я был создан",
+        "я — ChatGPT", "я - ChatGPT", "я ChatGPT",
+        "я — Rocket", "я - Rocket", "я Rocket"
     ]
     
     var filtered = text
-    
     for phrase in bannedPhrases {
         if filtered.localizedCaseInsensitiveContains(phrase) {
             filtered = filtered.replacingOccurrences(
@@ -69,7 +49,6 @@ func filterAIResponse(_ text: String) -> String {
         }
     }
     
-    // Дополнительная проверка
     let checkPhrases = ["Agnes", "ChatGPT", "Rocket", "DeepSeek", "Claude", "Sapiens"]
     for phrase in checkPhrases {
         if filtered.localizedCaseInsensitiveContains(phrase) {
@@ -83,7 +62,6 @@ func filterAIResponse(_ text: String) -> String {
 // MARK: - App Delegate
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-
         let firebaseConfig = FirebaseOptions(
             googleAppID: "1:649763368476:ios:de4e044d4d971168fa79d9",
             gcmSenderID: "649763368476"
@@ -413,17 +391,34 @@ class AIService {
             formattedMessages[formattedMessages.count - 1]["content"] = content
         }
 
-        let temperature: Double
+        // === РЕЖИМЫ ИИ ===
+        var temperature: Double
+        var maxTokens = role.maxTokens
+        var systemPrompt = SYSTEM_PROMPT
+
         switch mode {
-        case .standard: temperature = 0.5
-        case .reasoning: temperature = 0.1
-        case .fast: temperature = 0.8
+        case .standard:
+            temperature = 0.5
+            // Стандартный промпт
+
+        case .reasoning:
+            temperature = 0.3
+            // Добавляем инструкцию о пошаговом объяснении
+            systemPrompt = SYSTEM_PROMPT + "\n\nВажно: Сначала дай краткое пошаговое объяснение своего рассуждения (1-2 предложения), затем — полный ответ."
+
+        case .fast:
+            temperature = 0.8
+            maxTokens = min(maxTokens, 500) // Урезаем токены для скорости
+            systemPrompt = SYSTEM_PROMPT + "\n\nВажно: Отвечай максимально кратко и по делу. Без лишней воды."
         }
+
+        // Обновляем системное сообщение
+        formattedMessages[0]["content"] = systemPrompt
 
         let requestBody: [String: Any] = [
             "model": AGNES_MODEL,
             "messages": formattedMessages,
-            "max_tokens": role.maxTokens,
+            "max_tokens": maxTokens,
             "temperature": temperature,
             "stream": true
         ]
@@ -602,10 +597,6 @@ class ChatManager: ObservableObject {
         }
     }
 
-    func deleteChatWithConfirmation(_ id: String, onConfirm: @escaping () -> Void) {
-        onConfirm()
-    }
-
     func sendMessage(text: String, image: UIImage?, role: UserRole, mode: AIMode) {
         guard let uid = uid, let chatId = currentChatId, !isSending else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -678,7 +669,6 @@ class ChatManager: ObservableObject {
                         onChunk: { [weak self] chunk in
                             guard let self = self else { return }
                             fullResponse += chunk
-                            // Применяем фильтр к полному ответу
                             let filtered = filterAIResponse(fullResponse)
                             Task {
                                 try? await assistantRef.updateChildValues(["content": filtered])
@@ -700,7 +690,6 @@ class ChatManager: ObservableObject {
                     ]
                 } catch {
                     let errText = "⚠️ Не удалось получить ответ: \(error.localizedDescription)"
-                    // Фильтруем ошибку тоже
                     let filteredError = filterAIResponse(errText)
                     try? await assistantRef.updateChildValues(["content": filteredError])
                     if let idx = messages.firstIndex(where: { $0.id == assistantId }) {
@@ -712,7 +701,6 @@ class ChatManager: ObservableObject {
                 }
             }
 
-            // Финальная фильтрация всего ответа
             let finalFiltered = filterAIResponse(fullResponse)
             if !fullResponse.isEmpty && finalFiltered != fullResponse {
                 try? await assistantRef.updateChildValues(["content": finalFiltered])
@@ -730,7 +718,7 @@ class ChatManager: ObservableObject {
     }
 }
 
-// MARK: - Image Picker (iOS 15 совместимый)
+// MARK: - Image Picker
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var image: UIImage?
     @Environment(\.presentationMode) var presentationMode
@@ -883,11 +871,14 @@ struct AuthView: View {
                     .cornerRadius(12)
                     .disabled(authManager.isLoading)
 
+                    // ✅ Исправлено: .contentShape(Rectangle()) для всей области
                     Button(action: { withAnimation { isRegister.toggle() } }) {
                         Text(isRegister ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться")
                             .font(.subheadline)
                             .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
                     }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
 
                     if let error = authManager.errorMessage {
                         Text(error)
@@ -973,13 +964,14 @@ struct ChatHomeView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var chatManager: ChatManager
     @AppStorage("ai_mode") private var aiMode: String = AIMode.standard.rawValue
+    @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
 
     @State private var inputText = ""
     @State private var showChatList = false
     @State private var showImagePicker = false
     @State private var selectedImage: UIImage?
-    @State private var showingDeleteConfirmation = false
-    @State private var chatToDelete: String?
+
+    // ✅ Удалено: showingDeleteConfirmation и chatToDelete — перенесены в ChatListSheet
 
     var body: some View {
         NavigationView {
@@ -992,7 +984,7 @@ struct ChatHomeView: View {
                                     Spacer(minLength: 80)
                                     Text("🤖")
                                         .font(.system(size: 40))
-                                    Text("Начните разговор с Nemesis AI")
+                                    Text(localizedText("Начните разговор с Nemesis AI"))
                                         .foregroundColor(Color(red: 85/255, green: 85/255, blue: 102/255))
                                     Spacer()
                                 }
@@ -1024,7 +1016,7 @@ struct ChatHomeView: View {
                             .scaledToFill()
                             .frame(width: 44, height: 44)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                        Text("Фото прикреплено")
+                        Text(localizedText("Фото прикреплено"))
                             .font(.caption)
                             .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
                         Spacer()
@@ -1043,7 +1035,7 @@ struct ChatHomeView: View {
                         Button(action: {
                             aiMode = mode.rawValue
                         }) {
-                            Text(mode.rawValue)
+                            Text(localizedText(mode.rawValue))
                                 .font(.caption)
                                 .fontWeight(aiMode == mode.rawValue ? .semibold : .regular)
                                 .padding(.horizontal, 12)
@@ -1072,7 +1064,7 @@ struct ChatHomeView: View {
                     }
                     .disabled(chatManager.isUploadingPhoto)
 
-                    TextField("Напиши сообщение...", text: $inputText)
+                    TextField(localizedText("Напиши сообщение..."), text: $inputText)
                         .textFieldStyle(CustomTextFieldStyle())
                         .disabled(chatManager.isSending)
 
@@ -1125,24 +1117,11 @@ struct ChatHomeView: View {
                 }
             }
             .sheet(isPresented: $showChatList) {
-                ChatListSheet(chatToDelete: $chatToDelete, showingDeleteConfirmation: $showingDeleteConfirmation)
+                ChatListSheet()
                     .environmentObject(chatManager)
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $selectedImage)
-            }
-            .alert("Удалить чат?", isPresented: $showingDeleteConfirmation) {
-                Button("Удалить", role: .destructive) {
-                    if let id = chatToDelete {
-                        chatManager.deleteChat(id)
-                        chatToDelete = nil
-                    }
-                }
-                Button("Отмена", role: .cancel) {
-                    chatToDelete = nil
-                }
-            } message: {
-                Text("Все сообщения в этом чате будут удалены без возможности восстановления.")
             }
         }
     }
@@ -1159,14 +1138,23 @@ struct ChatHomeView: View {
             selectedImage = nil
         }
     }
+
+    // MARK: - Локализация
+    func localizedText(_ text: String) -> String {
+        let currentLang = AppLanguage(rawValue: language) ?? .system
+        // Для простоты пока возвращаем как есть
+        // В будущем можно добавить реальную локализацию
+        return text
+    }
 }
 
-// MARK: - Chat List Sheet
+// MARK: - Chat List Sheet (с подтверждением удаления внутри)
 struct ChatListSheet: View {
     @EnvironmentObject var chatManager: ChatManager
     @Environment(\.dismiss) var dismiss
-    @Binding var chatToDelete: String?
-    @Binding var showingDeleteConfirmation: Bool
+
+    @State private var chatToDelete: String?
+    @State private var showingDeleteConfirmation = false
 
     var body: some View {
         NavigationView {
@@ -1198,7 +1186,6 @@ struct ChatListSheet: View {
                         Button(action: {
                             chatToDelete = chat.id
                             showingDeleteConfirmation = true
-                            dismiss()
                         }) {
                             Image(systemName: "trash")
                                 .foregroundColor(.red)
@@ -1207,6 +1194,12 @@ struct ChatListSheet: View {
                         .buttonStyle(PlainButtonStyle())
                     }
                     .listRowBackground(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.03))
+                }
+                .onDelete { indices in
+                    if let idx = indices.first {
+                        chatToDelete = chatManager.chats[idx].id
+                        showingDeleteConfirmation = true
+                    }
                 }
             }
             .listStyle(.plain)
@@ -1226,6 +1219,19 @@ struct ChatListSheet: View {
                         Image(systemName: "plus")
                     }
                 }
+            }
+            .alert("Удалить чат?", isPresented: $showingDeleteConfirmation) {
+                Button("Удалить", role: .destructive) {
+                    if let id = chatToDelete {
+                        chatManager.deleteChat(id)
+                        chatToDelete = nil
+                    }
+                }
+                Button("Отмена", role: .cancel) {
+                    chatToDelete = nil
+                }
+            } message: {
+                Text("Все сообщения в этом чате будут удалены без возможности восстановления.")
             }
         }
         .preferredColorScheme(.dark)
