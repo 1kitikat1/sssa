@@ -556,14 +556,14 @@ class ChatManager: ObservableObject {
             let now = Date().timeIntervalSince1970
             let userRef = chatMessagesRef.childByAutoId()
             
-            await userRef.setValue([
+            try? await userRef.setValue([
                 "role": "user",
                 "content": userContent,
                 "timestamp": now,
                 "imageUrl": imageUrl as Any
             ])
             
-            await chatRef.updateChildValues(["updated_at": now])
+            try? await chatRef.updateChildValues(["updated_at": now])
 
             await MainActor.run {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -576,7 +576,7 @@ class ChatManager: ObservableObject {
             let assistantRef = chatMessagesRef.childByAutoId()
             let assistantTimestamp = Date().timeIntervalSince1970
             
-            await assistantRef.setValue(["role": "assistant", "content": "", "timestamp": assistantTimestamp])
+            try? await assistantRef.setValue(["role": "assistant", "content": "", "timestamp": assistantTimestamp])
             let assistantId = assistantRef.key ?? UUID().uuidString
 
             await MainActor.run {
@@ -597,7 +597,7 @@ class ChatManager: ObservableObject {
                         guard let self = self else { return }
                         fullResponse += chunk
                         Task {
-                            await assistantRef.updateChildValues(["content": fullResponse])
+                            try? await assistantRef.updateChildValues(["content": fullResponse])
                         }
                         if let idx = self.messages.firstIndex(where: { $0.id == assistantId }) {
                             Task { @MainActor in
@@ -615,7 +615,7 @@ class ChatManager: ObservableObject {
                     ]
                 } catch {
                     let errText = "⚠️ Не удалось получить ответ: \(error.localizedDescription)"
-                    await assistantRef.updateChildValues(["content": errText])
+                    try? await assistantRef.updateChildValues(["content": errText])
                     if let idx = messages.firstIndex(where: { $0.id == assistantId }) {
                         await MainActor.run {
                             messages[idx].content = errText
@@ -631,7 +631,6 @@ class ChatManager: ObservableObject {
         }
     }
 }
-
 // MARK: - Image Picker (iOS 15 совместимый)
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var image: UIImage?
