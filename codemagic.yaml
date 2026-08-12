@@ -1,5 +1,5 @@
 workflows:
-  ios-native:
+  ios-workflow:
     name: iOS Native Build
     instance_type: mac_mini_m1
     max_build_duration: 60
@@ -11,9 +11,9 @@ workflows:
         - ~/.cocoapods
         - Pods
     scripts:
-      - name: Clean up
+      - name: Clean up everything
         script: |
-          rm -rf *.xcodeproj *.xcworkspace build
+          rm -rf *.xcodeproj *.xcworkspace build Pods Podfile.lock ~/.cocoapods
 
       - name: Create Info.plist
         script: |
@@ -58,9 +58,8 @@ workflows:
           </plist>
           EOF
 
-      - name: Create Xcode project with executable
+      - name: Create Xcode project
         script: |
-          # Создаём структуру проекта
           mkdir -p NemesisAI.xcodeproj
           
           cat > NemesisAI.xcodeproj/project.pbxproj << 'EOF'
@@ -203,14 +202,9 @@ workflows:
           }
           EOF
 
-      - name: Check project
-        script: |
-          echo "📁 Project files:"
-          ls -la NemesisAI.xcodeproj/
-
       - name: Install Pods
         script: |
-          pod install
+          pod install --repo-update
 
       - name: Build IPA
         script: |
@@ -224,7 +218,6 @@ workflows:
           
           echo "📦 Using workspace: $WORKSPACE"
 
-          # Сборка
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme NemesisAI \
@@ -233,32 +226,18 @@ workflows:
             -arch arm64 \
             CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath build \
-            OTHER_SWIFT_FLAGS="-DDEBUG"
+            -verbose
 
-          # Проверяем наличие .app
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -1)
           
           if [ -z "$APP_PATH" ]; then
             echo "❌ App not found!"
-            echo "🔍 Searching in build folder..."
             find build -name "*.app" 2>/dev/null || echo "No .app found"
             exit 1
           fi
 
           echo "✅ App found: $APP_PATH"
-          echo "📁 Contents of .app:"
-          ls -la "$APP_PATH"
 
-          # Проверяем наличие исполняемого файла
-          EXEC_PATH="$APP_PATH/NemesisAI"
-          if [ ! -f "$EXEC_PATH" ]; then
-            echo "⚠️ Executable not found! Creating dummy..."
-            # Создаём пустой исполняемый файл
-            echo "#!/bin/bash" > "$EXEC_PATH"
-            chmod +x "$EXEC_PATH"
-          fi
-
-          # Создаём IPA
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r NemesisAI.ipa Payload/
