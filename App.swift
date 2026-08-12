@@ -62,7 +62,6 @@ struct NemesisAIApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(authManager)
-                .preferredColorScheme(.dark)
         }
     }
 }
@@ -331,6 +330,7 @@ class AIService {
         messages: [[String: Any]],
         imageUrl: String?,
         role: UserRole,
+        mode: AIMode = .standard,
         onChunk: @escaping (String) -> Void
     ) async throws -> StreamResult {
         var formattedMessages: [[String: Any]] = [
@@ -347,11 +347,18 @@ class AIService {
             formattedMessages[formattedMessages.count - 1]["content"] = content
         }
 
+        let temperature: Double
+        switch mode {
+        case .standard: temperature = 0.5
+        case .reasoning: temperature = 0.1
+        case .fast: temperature = 0.8
+        }
+
         let requestBody: [String: Any] = [
             "model": AGNES_MODEL,
             "messages": formattedMessages,
             "max_tokens": role.maxTokens,
-            "temperature": 0.5,
+            "temperature": temperature,
             "stream": true
         ]
 
@@ -426,6 +433,25 @@ class AIService {
         }
         return url
     }
+}
+
+// MARK: - App Settings
+enum AppTheme: String, CaseIterable {
+    case dark = "Тёмная"
+    case light = "Светлая"
+    case system = "Системная"
+}
+
+enum AIMode: String, CaseIterable {
+    case standard = "Стандартный"
+    case reasoning = "Рассуждение"
+    case fast = "Быстрый"
+}
+
+enum AppLanguage: String, CaseIterable {
+    case ru = "Русский"
+    case en = "English"
+    case system = "Системный"
 }
 
 // MARK: - Chat Manager
@@ -529,7 +555,12 @@ class ChatManager: ObservableObject {
         }
     }
 
-    func sendMessage(text: String, image: UIImage?, role: UserRole) {
+    func deleteChatWithConfirmation(_ id: String, onConfirm: @escaping () -> Void) {
+        // Показываем алерт через UI
+        onConfirm()
+    }
+
+    func sendMessage(text: String, image: UIImage?, role: UserRole, mode: AIMode) {
         guard let uid = uid, let chatId = currentChatId, !isSending else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || image != nil else { return }
@@ -555,14 +586,14 @@ class ChatManager: ObservableObject {
             let userContent = trimmed.isEmpty ? "📸 Фото" : trimmed
             let now = Date().timeIntervalSince1970
             let userRef = chatMessagesRef.childByAutoId()
-            
+
             try? await userRef.setValue([
                 "role": "user",
                 "content": userContent,
                 "timestamp": now,
                 "imageUrl": imageUrl as Any
             ])
-            
+
             try? await chatRef.updateChildValues(["updated_at": now])
 
             await MainActor.run {
@@ -575,7 +606,7 @@ class ChatManager: ObservableObject {
 
             let assistantRef = chatMessagesRef.childByAutoId()
             let assistantTimestamp = Date().timeIntervalSince1970
-            
+
             try? await assistantRef.setValue(["role": "assistant", "content": "", "timestamp": assistantTimestamp])
             let assistantId = assistantRef.key ?? UUID().uuidString
 
@@ -593,18 +624,24 @@ class ChatManager: ObservableObject {
 
             while true {
                 do {
-                    let result = try await AIService.shared.streamChat(messages: convo, imageUrl: streamImage, role: role, onChunk: { [weak self] chunk in
-                        guard let self = self else { return }
-                        fullResponse += chunk
-                        Task {
-                            try? await assistantRef.updateChildValues(["content": fullResponse])
-                        }
-                        if let idx = self.messages.firstIndex(where: { $0.id == assistantId }) {
-                            Task { @MainActor in
-                                self.messages[idx].content = fullResponse
+                    let result = try await AIService.shared.streamChat(
+                        messages: convo,
+                        imageUrl: streamImage,
+                        role: role,
+                        mode: mode,
+                        onChunk: { [weak self] chunk in
+                            guard let self = self else { return }
+                            fullResponse += chunk
+                            Task {
+                                try? await assistantRef.updateChildValues(["content": fullResponse])
+                            }
+                            if let idx = self.messages.firstIndex(where: { $0.id == assistantId }) {
+                                Task { @MainActor in
+                                    self.messages[idx].content = fullResponse
+                                }
                             }
                         }
-                    })
+                    )
                     streamImage = nil
 
                     if result.finishReason != "length" || attempt >= maxContinuations { break }
@@ -631,6 +668,7 @@ class ChatManager: ObservableObject {
         }
     }
 }
+
 // MARK: - Image Picker (iOS 15 совместимый)
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var image: UIImage?
@@ -761,6 +799,7 @@ struct AuthView: View {
                     SecureField("Пароль", text: $password)
                         .textFieldStyle(CustomTextFieldStyle())
 
+                    // Кнопка регистрации/входа отдельная
                     Button(action: handleAuth) {
                         if authManager.isLoading {
                             ProgressView()
@@ -784,6 +823,7 @@ struct AuthView: View {
                     .cornerRadius(12)
                     .disabled(authManager.isLoading)
 
+                    // Кнопка переключения режима (текст-ссылка)
                     Button(action: { withAnimation { isRegister.toggle() } }) {
                         Text(isRegister ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться")
                             .font(.subheadline)
@@ -827,6 +867,8 @@ struct AuthView: View {
 struct MainTabView: View {
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var chatManager = ChatManager()
+    @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
+    @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
 
     var body: some View {
         TabView {
@@ -839,9 +881,11 @@ struct MainTabView: View {
                 .tabItem { Label("Профиль", systemImage: "person.fill") }
 
             SettingsView()
+                .environmentObject(chatManager)
                 .tabItem { Label("Настройки", systemImage: "gearshape.fill") }
         }
         .accentColor(Color(red: 108/255, green: 99/255, blue: 255/255))
+        .preferredColorScheme(colorScheme)
         .onAppear {
             if let uid = authManager.currentUser?.uid {
                 chatManager.attach(uid: uid)
@@ -855,17 +899,28 @@ struct MainTabView: View {
             }
         }
     }
+
+    var colorScheme: ColorScheme? {
+        switch theme {
+        case AppTheme.dark.rawValue: return .dark
+        case AppTheme.light.rawValue: return .light
+        default: return nil // .system
+        }
+    }
 }
 
 // MARK: - Chat Home View
 struct ChatHomeView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var chatManager: ChatManager
+    @AppStorage("ai_mode") private var aiMode: String = AIMode.standard.rawValue
 
     @State private var inputText = ""
     @State private var showChatList = false
     @State private var showImagePicker = false
     @State private var selectedImage: UIImage?
+    @State private var showingDeleteConfirmation = false
+    @State private var chatToDelete: String?
 
     var body: some View {
         NavigationView {
@@ -923,6 +978,30 @@ struct ChatHomeView: View {
                     .padding(.vertical, 6)
                 }
 
+                // Режимы ИИ
+                HStack(spacing: 8) {
+                    ForEach(AIMode.allCases, id: \.self) { mode in
+                        Button(action: {
+                            aiMode = mode.rawValue
+                        }) {
+                            Text(mode.rawValue)
+                                .font(.caption)
+                                .fontWeight(aiMode == mode.rawValue ? .semibold : .regular)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(
+                                    aiMode == mode.rawValue ?
+                                    Color(red: 108/255, green: 99/255, blue: 255/255).opacity(0.2) :
+                                    Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.05)
+                                )
+                                .foregroundColor(aiMode == mode.rawValue ? Color(red: 108/255, green: 99/255, blue: 255/255) : .gray)
+                                .cornerRadius(8)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+
                 HStack(spacing: 12) {
                     Button(action: { showImagePicker = true }) {
                         Image(systemName: "paperclip")
@@ -963,7 +1042,7 @@ struct ChatHomeView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 8)
-                .padding(.top, 6)
+                .padding(.top, 4)
             }
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
             .navigationBarTitleDisplayMode(.inline)
@@ -987,11 +1066,24 @@ struct ChatHomeView: View {
                 }
             }
             .sheet(isPresented: $showChatList) {
-                ChatListSheet()
+                ChatListSheet(chatToDelete: $chatToDelete, showingDeleteConfirmation: $showingDeleteConfirmation)
                     .environmentObject(chatManager)
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $selectedImage)
+            }
+            .alert("Удалить чат?", isPresented: $showingDeleteConfirmation) {
+                Button("Удалить", role: .destructive) {
+                    if let id = chatToDelete {
+                        chatManager.deleteChat(id)
+                        chatToDelete = nil
+                    }
+                }
+                Button("Отмена", role: .cancel) {
+                    chatToDelete = nil
+                }
+            } message: {
+                Text("Все сообщения в этом чате будут удалены без возможности восстановления.")
             }
         }
     }
@@ -1001,7 +1093,8 @@ struct ChatHomeView: View {
         if chatManager.currentChatId == nil {
             chatManager.createNewChat()
         }
-        chatManager.sendMessage(text: inputText, image: selectedImage, role: role)
+        let mode = AIMode(rawValue: aiMode) ?? .standard
+        chatManager.sendMessage(text: inputText, image: selectedImage, role: role, mode: mode)
         inputText = ""
         withAnimation {
             selectedImage = nil
@@ -1013,37 +1106,49 @@ struct ChatHomeView: View {
 struct ChatListSheet: View {
     @EnvironmentObject var chatManager: ChatManager
     @Environment(\.dismiss) var dismiss
+    @Binding var chatToDelete: String?
+    @Binding var showingDeleteConfirmation: Bool
 
     var body: some View {
         NavigationView {
             List {
                 ForEach(chatManager.chats) { chat in
-                    Button(action: {
-                        chatManager.selectChat(chat.id)
-                        dismiss()
-                    }) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(chat.title)
-                                    .foregroundColor(.white)
-                                    .fontWeight(chat.id == chatManager.currentChatId ? .semibold : .regular)
-                                Text("\(chat.messages.count) сообщений")
-                                    .font(.caption)
-                                    .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
-                            }
-                            Spacer()
-                            if chat.id == chatManager.currentChatId {
-                                Image(systemName: "checkmark")
-                                    .foregroundColor(Color(red: 108/255, green: 99/255, blue: 255/255))
+                    HStack {
+                        Button(action: {
+                            chatManager.selectChat(chat.id)
+                            dismiss()
+                        }) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(chat.title)
+                                        .foregroundColor(.white)
+                                        .fontWeight(chat.id == chatManager.currentChatId ? .semibold : .regular)
+                                    Text("\(chat.messages.count) сообщений")
+                                        .font(.caption)
+                                        .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
+                                }
+                                Spacer()
+                                if chat.id == chatManager.currentChatId {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(Color(red: 108/255, green: 99/255, blue: 255/255))
+                                }
                             }
                         }
+                        .buttonStyle(PlainButtonStyle())
+
+                        // Кнопка удаления (корзина)
+                        Button(action: {
+                            chatToDelete = chat.id
+                            showingDeleteConfirmation = true
+                            dismiss()
+                        }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                                .font(.system(size: 16))
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     .listRowBackground(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.03))
-                }
-                .onDelete { indices in
-                    indices.forEach { idx in
-                        chatManager.deleteChat(chatManager.chats[idx].id)
-                    }
                 }
             }
             .listStyle(.plain)
@@ -1162,6 +1267,9 @@ struct ProfileView: View {
     @EnvironmentObject var chatManager: ChatManager
     @State private var showKeyAlert = false
     @State private var generatedKey = ""
+    @State private var keyInput = ""
+    @State private var keyStatus = ""
+    @State private var isActivating = false
 
     var body: some View {
         NavigationView {
@@ -1225,6 +1333,40 @@ struct ProfileView: View {
                     .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
                     .cornerRadius(16)
 
+                    // Активация ключа в профиле
+                    VStack(spacing: 12) {
+                        Text("🎁 Активировать ключ")
+                            .font(.headline)
+                            .foregroundColor(.white)
+
+                        HStack {
+                            TextField("Введите ключ...", text: $keyInput)
+                                .textFieldStyle(CustomTextFieldStyle())
+                                .autocapitalization(.allCharacters)
+                            Button(isActivating ? "⏳" : "Активировать") {
+                                activateKey()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(Color(red: 108/255, green: 99/255, blue: 255/255))
+                            .cornerRadius(12)
+                            .foregroundColor(.white)
+                            .font(.headline)
+                            .disabled(isActivating || keyInput.isEmpty)
+                        }
+                        .padding(.horizontal)
+
+                        if !keyStatus.isEmpty {
+                            Text(keyStatus)
+                                .font(.caption)
+                                .foregroundColor(keyStatus.contains("✅") ? .green : .red)
+                        }
+                    }
+                    .padding()
+                    .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
+                    .cornerRadius(20)
+                    .padding(.horizontal)
+
                     if user.role.canGenerateKeys {
                         Button(action: generateKey) {
                             HStack {
@@ -1279,6 +1421,23 @@ struct ProfileView: View {
         }
     }
 
+    func activateKey() {
+        guard !keyInput.isEmpty else {
+            keyStatus = "❌ Введите ключ"
+            return
+        }
+        isActivating = true
+        authManager.activateKey(key: keyInput.uppercased()) { success in
+            isActivating = false
+            if success {
+                keyStatus = "✅ Роль обновлена!"
+                keyInput = ""
+            } else {
+                keyStatus = authManager.errorMessage ?? "❌ Ошибка активации"
+            }
+        }
+    }
+
     func generateKey() {
         let key = "NEM-" + UUID().uuidString.prefix(8).uppercased() + "-" + UUID().uuidString.prefix(6).uppercased()
         generatedKey = key
@@ -1289,14 +1448,33 @@ struct ProfileView: View {
 // MARK: - Settings View
 struct SettingsView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var chatManager: ChatManager
+
+    @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
+    @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
     @AppStorage("nemesis_font_size") private var fontSize: Double = 16
-    @State private var activateKeyInput = ""
-    @State private var activateStatus = ""
-    @State private var isActivating = false
 
     var body: some View {
         NavigationView {
             Form {
+                Section(header: Text("Тема").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
+                    Picker("Тема", selection: $theme) {
+                        ForEach(AppTheme.allCases, id: \.self) { theme in
+                            Text(theme.rawValue).tag(theme.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section(header: Text("Язык").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
+                    Picker("Язык", selection: $language) {
+                        ForEach(AppLanguage.allCases, id: \.self) { lang in
+                            Text(lang.rawValue).tag(lang.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
                 Section(header: Text("Внешний вид").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
                     HStack {
                         Text("Размер текста")
@@ -1304,22 +1482,6 @@ struct SettingsView: View {
                         Stepper(value: $fontSize, in: 12...24, step: 2) {
                             Text("\(Int(fontSize))")
                         }
-                    }
-                }
-
-                Section(header: Text("Подписка").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
-                    HStack {
-                        TextField("Введите ключ...", text: $activateKeyInput)
-                            .autocapitalization(.allCharacters)
-                        Button(isActivating ? "⏳" : "Активировать") {
-                            activateKey()
-                        }
-                        .disabled(isActivating || activateKeyInput.isEmpty)
-                    }
-                    if !activateStatus.isEmpty {
-                        Text(activateStatus)
-                            .font(.caption)
-                            .foregroundColor(activateStatus.contains("✅") ? .green : .red)
                     }
                 }
 
@@ -1338,20 +1500,6 @@ struct SettingsView: View {
                         .font(.headline)
                         .foregroundColor(.white)
                 }
-            }
-        }
-    }
-
-    func activateKey() {
-        guard !activateKeyInput.isEmpty else { return }
-        isActivating = true
-        authManager.activateKey(key: activateKeyInput.uppercased()) { success in
-            isActivating = false
-            if success {
-                activateStatus = "✅ Роль обновлена!"
-                activateKeyInput = ""
-            } else {
-                activateStatus = authManager.errorMessage ?? "❌ Ошибка активации"
             }
         }
     }
