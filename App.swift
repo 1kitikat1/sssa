@@ -502,36 +502,58 @@ class AIService {
         }
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 60 // ✅ Добавлен таймаут 60 секунд
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(AGNES_API_KEY)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        
+        // ✅ Проверяем статус ответа
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
-            throw NSError(domain: "AIService", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+            var errorText = "HTTP \(http.statusCode)"
+            do {
+                let errorData = try await String(bytes: bytes, encoding: .utf8) ?? ""
+                errorText = "HTTP \(http.statusCode): \(errorData.prefix(200))"
+            } catch {}
+            throw NSError(domain: "AIService", code: http.statusCode, userInfo: [
+                NSLocalizedDescriptionKey: errorText
+            ])
         }
 
         var fullText = ""
         var finishReason: String? = nil
 
-        for try await line in bytes.lines {
-            guard line.hasPrefix("data: ") else { continue }
-            let jsonString = String(line.dropFirst(6))
-            if jsonString == "[DONE]" { continue }
-            guard let data = jsonString.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = json["choices"] as? [[String: Any]],
-                  let choice = choices.first else { continue }
+        do {
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data: ") else { continue }
+                let jsonString = String(line.dropFirst(6))
+                if jsonString == "[DONE]" { continue }
+                guard let data = jsonString.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let choices = json["choices"] as? [[String: Any]],
+                      let choice = choices.first else { continue }
 
-            if let delta = choice["delta"] as? [String: Any],
-               let content = delta["content"] as? String, !content.isEmpty {
-                fullText += content
-                onChunk(content)
+                if let delta = choice["delta"] as? [String: Any],
+                   let content = delta["content"] as? String, !content.isEmpty {
+                    fullText += content
+                    onChunk(content)
+                }
+                if let fr = choice["finish_reason"] as? String {
+                    finishReason = fr
+                }
             }
-            if let fr = choice["finish_reason"] as? String {
-                finishReason = fr
-            }
+        } catch {
+            throw NSError(domain: "AIService", code: -1, userInfo: [
+                NSLocalizedDescriptionKey: "Ошибка чтения ответа: \(error.localizedDescription)"
+            ])
+        }
+
+        if fullText.isEmpty {
+            throw NSError(domain: "AIService", code: -1, userInfo: [
+                NSLocalizedDescriptionKey: "Пустой ответ от сервера"
+            ])
         }
 
         return StreamResult(text: fullText, finishReason: finishReason)
@@ -544,6 +566,7 @@ class AIService {
         let base64 = jpegData.base64EncodedString()
 
         var request = URLRequest(url: URL(string: "https://api.imgbb.com/1/upload")!)
+        request.timeoutInterval = 30
         request.httpMethod = "POST"
         let boundary = "Boundary-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
