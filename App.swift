@@ -37,7 +37,7 @@ func filterAIResponse(_ text: String) -> String {
         "я — ChatGPT", "я - ChatGPT", "я ChatGPT",
         "я — Rocket", "я - Rocket", "я Rocket"
     ]
-    
+
     var filtered = text
     for phrase in bannedPhrases {
         if filtered.localizedCaseInsensitiveContains(phrase) {
@@ -48,14 +48,14 @@ func filterAIResponse(_ text: String) -> String {
             )
         }
     }
-    
+
     let checkPhrases = ["Agnes", "ChatGPT", "Rocket", "DeepSeek", "Claude", "Sapiens"]
     for phrase in checkPhrases {
         if filtered.localizedCaseInsensitiveContains(phrase) {
             return "Я — Nemesis AI, созданный командой Kotik Team. Чем могу помочь?"
         }
     }
-    
+
     return filtered
 }
 
@@ -342,22 +342,123 @@ struct ChatSession: Identifiable, Equatable {
 }
 
 // MARK: - App Settings
+// ВАЖНО: rawValue теперь стабильные английские идентификаторы (а не русский текст,
+// как было раньше) — иначе полноценная локализация невозможна: то, что хранится
+// в @AppStorage, не должно зависеть от того, какой язык сейчас выбран для отображения.
 enum AppTheme: String, CaseIterable {
-    case dark = "Тёмная"
-    case light = "Светлая"
-    case system = "Системная"
+    case dark, light, system
+
+    func displayName(_ lang: String) -> String {
+        switch self {
+        case .dark: return t("theme_dark", lang)
+        case .light: return t("theme_light", lang)
+        case .system: return t("theme_system", lang)
+        }
+    }
 }
 
 enum AIMode: String, CaseIterable {
-    case standard = "Стандартный"
-    case reasoning = "Рассуждение"
-    case fast = "Быстрый"
+    case standard, reasoning, fast
+
+    func displayName(_ lang: String) -> String {
+        switch self {
+        case .standard: return t("mode_standard", lang)
+        case .reasoning: return t("mode_reasoning", lang)
+        case .fast: return t("mode_fast", lang)
+        }
+    }
 }
 
 enum AppLanguage: String, CaseIterable {
-    case ru = "Русский"
-    case en = "English"
-    case system = "Системный"
+    case ru, en, system
+
+    func displayName(_ lang: String) -> String {
+        switch self {
+        case .ru: return "Русский"
+        case .en: return "English"
+        case .system: return t("lang_system", lang)
+        }
+    }
+}
+
+// MARK: - Localization
+// Простой, но полноценный словарь переводов + функция t(key, lang).
+// "system" резолвится в ru/en по языку устройства.
+func resolvedLanguageCode(_ raw: String) -> String {
+    switch AppLanguage(rawValue: raw) ?? .system {
+    case .ru: return "ru"
+    case .en: return "en"
+    case .system:
+        let preferred = Locale.preferredLanguages.first ?? "en"
+        return preferred.lowercased().hasPrefix("ru") ? "ru" : "en"
+    }
+}
+
+let translations: [String: [String: String]] = [
+    "tab_chat": ["ru": "Чат", "en": "Chat"],
+    "tab_profile": ["ru": "Профиль", "en": "Profile"],
+    "tab_settings": ["ru": "Настройки", "en": "Settings"],
+
+    "auth_login_title": ["ru": "ВХОД", "en": "SIGN IN"],
+    "auth_register_title": ["ru": "СОЗДАЙТЕ АККАУНТ", "en": "CREATE ACCOUNT"],
+    "auth_username_ph": ["ru": "Имя пользователя", "en": "Username"],
+    "auth_email_ph": ["ru": "Email", "en": "Email"],
+    "auth_password_ph": ["ru": "Пароль", "en": "Password"],
+    "auth_login_btn": ["ru": "ВОЙТИ", "en": "SIGN IN"],
+    "auth_register_btn": ["ru": "ЗАРЕГИСТРИРОВАТЬСЯ", "en": "SIGN UP"],
+    "auth_to_register": ["ru": "Нет аккаунта? Зарегистрироваться", "en": "No account? Sign up"],
+    "auth_to_login": ["ru": "Уже есть аккаунт? Войти", "en": "Already have an account? Sign in"],
+    "auth_err_username": ["ru": "❌ Имя не менее 3 символов", "en": "❌ Username must be at least 3 characters"],
+    "auth_err_password": ["ru": "❌ Пароль не менее 6 символов", "en": "❌ Password must be at least 6 characters"],
+
+    "chat_placeholder": ["ru": "Напиши сообщение...", "en": "Type a message..."],
+    "chat_empty": ["ru": "Начните разговор с Nemesis AI", "en": "Start a conversation with Nemesis AI"],
+    "chat_photo_attached": ["ru": "Фото прикреплено", "en": "Photo attached"],
+    "chat_default_title": ["ru": "Nemesis AI", "en": "Nemesis AI"],
+
+    "mode_standard": ["ru": "Стандартный", "en": "Standard"],
+    "mode_reasoning": ["ru": "Рассуждение", "en": "Reasoning"],
+    "mode_fast": ["ru": "Быстрый", "en": "Fast"],
+
+    "theme_dark": ["ru": "Тёмная", "en": "Dark"],
+    "theme_light": ["ru": "Светлая", "en": "Light"],
+    "theme_system": ["ru": "Системная", "en": "System"],
+    "lang_system": ["ru": "Системный", "en": "System"],
+
+    "chatlist_title": ["ru": "Мои чаты", "en": "My chats"],
+    "chatlist_close": ["ru": "Закрыть", "en": "Close"],
+    "chatlist_messages": ["ru": "сообщений", "en": "messages"],
+    "chatlist_delete_title": ["ru": "Удалить чат?", "en": "Delete chat?"],
+    "chatlist_delete_msg": ["ru": "Все сообщения в этом чате будут удалены без возможности восстановления.", "en": "All messages in this chat will be permanently deleted."],
+    "delete": ["ru": "Удалить", "en": "Delete"],
+    "cancel": ["ru": "Отмена", "en": "Cancel"],
+
+    "profile_title": ["ru": "Профиль", "en": "Profile"],
+    "profile_tokens": ["ru": "Токенов", "en": "Tokens"],
+    "profile_chats": ["ru": "Чатов", "en": "Chats"],
+    "profile_activate_title": ["ru": "🎁 Активировать ключ", "en": "🎁 Activate a key"],
+    "profile_activate_ph": ["ru": "Введите ключ...", "en": "Enter key..."],
+    "profile_activate_btn": ["ru": "Активировать", "en": "Activate"],
+    "profile_activate_empty": ["ru": "❌ Введите ключ", "en": "❌ Enter a key"],
+    "profile_generate_key": ["ru": "Сгенерировать ключ", "en": "Generate key"],
+    "profile_logout": ["ru": "Выйти", "en": "Log out"],
+    "profile_new_key_title": ["ru": "👑 Новый ключ", "en": "👑 New key"],
+    "profile_copy": ["ru": "Скопировать", "en": "Copy"],
+
+    "settings_title": ["ru": "Настройки", "en": "Settings"],
+    "settings_theme": ["ru": "Тема", "en": "Theme"],
+    "settings_language": ["ru": "Язык", "en": "Language"],
+    "settings_appearance": ["ru": "Внешний вид", "en": "Appearance"],
+    "settings_font_size": ["ru": "Размер текста", "en": "Text size"],
+    "settings_about": ["ru": "О приложении", "en": "About"],
+    "settings_version": ["ru": "Версия", "en": "Version"],
+    "settings_team": ["ru": "Команда", "en": "Team"],
+    "settings_support": ["ru": "Поддержка", "en": "Support"],
+]
+
+func t(_ key: String, _ langRaw: String) -> String {
+    let lang = resolvedLanguageCode(langRaw)
+    return translations[key]?[lang] ?? translations[key]?["en"] ?? key
 }
 
 // MARK: - AI Service
@@ -390,7 +491,7 @@ class AIService {
             formattedMessages[formattedMessages.count - 1]["content"] = content
         }
 
-        // === РЕЖИМЫ ИИ ===
+        // === РЕЖИМЫ ИИ — реально разное поведение, не только температура ===
         var temperature: Double
         var maxTokens = role.maxTokens
         var systemPrompt = SYSTEM_PROMPT
@@ -760,6 +861,48 @@ extension View {
     }
 }
 
+// MARK: - Keyboard Responder
+// Раньше при наборе текста экран "прыгал" вверх — SwiftUI's автоматический
+// keyboard-avoidance конфликтовал с нашим ScrollViewReader (который сам
+// скроллит список сообщений). Берём управление полностью на себя: игнорируем
+// системный сдвиг (.ignoresSafeArea(.keyboard)) и вручную поднимаем контент
+// ровно на высоту клавиатуры одним плавным движением — без двойного скачка.
+final class KeyboardResponder: ObservableObject {
+    @Published var currentHeight: CGFloat = 0
+    private var showObserver: NSObjectProtocol?
+    private var hideObserver: NSObjectProtocol?
+
+    init() {
+        showObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    self.currentHeight = frame.height
+                }
+            }
+        }
+        hideObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                self.currentHeight = 0
+            }
+        }
+    }
+
+    deinit {
+        if let showObserver = showObserver { NotificationCenter.default.removeObserver(showObserver) }
+        if let hideObserver = hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
+    }
+}
+
 // MARK: - Stars View
 struct StarsView: View {
     let starCount = 120
@@ -801,6 +944,8 @@ struct CustomTextFieldStyle: TextFieldStyle {
 // MARK: - Auth View
 struct AuthView: View {
     @EnvironmentObject var authManager: AuthManager
+    @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
+
     @State private var email = ""
     @State private var password = ""
     @State private var username = ""
@@ -826,36 +971,41 @@ struct AuthView: View {
                 .padding(.top, 40)
 
                 VStack(spacing: 16) {
-                    Text(isRegister ? "СОЗДАЙТЕ АККАУНТ" : "ВХОД")
+                    Text(isRegister ? t("auth_register_title", language) : t("auth_login_title", language))
                         .font(.headline)
                         .foregroundColor(.white)
 
                     if isRegister {
-                        TextField("Имя пользователя", text: $username)
+                        TextField(t("auth_username_ph", language), text: $username)
                             .textFieldStyle(CustomTextFieldStyle())
                             .autocapitalization(.none)
                     }
 
-                    TextField("Email", text: $email)
+                    TextField(t("auth_email_ph", language), text: $email)
                         .textFieldStyle(CustomTextFieldStyle())
                         .autocapitalization(.none)
                         .keyboardType(.emailAddress)
 
-                    SecureField("Пароль", text: $password)
+                    SecureField(t("auth_password_ph", language), text: $password)
                         .textFieldStyle(CustomTextFieldStyle())
 
+                    // ===== ОСНОВНАЯ КНОПКА =====
                     Button(action: handleAuth) {
-                        if authManager.isLoading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
-                            Text(isRegister ? "ЗАРЕГИСТРИРОВАТЬСЯ" : "ВОЙТИ")
-                                .font(.headline)
-                                .foregroundColor(.white)
+                        Group {
+                            if authManager.isLoading {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            } else {
+                                Text(isRegister ? t("auth_register_btn", language) : t("auth_login_btn", language))
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                            }
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding()
+                    .buttonStyle(PlainButtonStyle())
                     .background(
                         LinearGradient(
                             colors: [Color(red: 108/255, green: 99/255, blue: 255/255),
@@ -867,13 +1017,26 @@ struct AuthView: View {
                     .cornerRadius(12)
                     .disabled(authManager.isLoading)
 
+                    // ===== ВТОРАЯ КНОПКА (раньше реагировала только на сами
+                    // буквы текста — теперь полноценная кнопка на всю ширину
+                    // с contentShape(Rectangle()), которая делает кликабельной
+                    // ВСЮ прямоугольную область, а не только glyph-ы шрифта) =====
                     Button(action: { withAnimation { isRegister.toggle() } }) {
-                        Text(isRegister ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться")
+                        Text(isRegister ? t("auth_to_login", language) : t("auth_to_register", language))
                             .font(.subheadline)
-                            .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
+                            .fontWeight(.semibold)
+                            .foregroundColor(Color(red: 108/255, green: 99/255, blue: 255/255))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
+                    .buttonStyle(PlainButtonStyle())
+                    .background(Color(red: 108/255, green: 99/255, blue: 255/255).opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(red: 108/255, green: 99/255, blue: 255/255).opacity(0.25), lineWidth: 1)
+                    )
+                    .cornerRadius(12)
 
                     if let error = authManager.errorMessage {
                         Text(error)
@@ -894,11 +1057,11 @@ struct AuthView: View {
 
         if isRegister {
             guard username.count >= 3 else {
-                authManager.errorMessage = "❌ Имя не менее 3 символов"
+                authManager.errorMessage = t("auth_err_username", language)
                 return
             }
             guard password.count >= 6 else {
-                authManager.errorMessage = "❌ Пароль не менее 6 символов"
+                authManager.errorMessage = t("auth_err_password", language)
                 return
             }
             authManager.signUp(email: email, password: password, username: username) { _ in }
@@ -914,7 +1077,7 @@ struct MainTabView: View {
     @StateObject private var chatManager = ChatManager()
     @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
-    
+
     @State private var showEasterEgg = false
     @State private var easterEggText = ""
 
@@ -922,17 +1085,20 @@ struct MainTabView: View {
         TabView {
             ChatHomeView()
                 .environmentObject(chatManager)
-                .tabItem { Label("Чат", systemImage: "message.fill") }
+                .tabItem { Label(t("tab_chat", language), systemImage: "message.fill") }
 
             ProfileView()
                 .environmentObject(chatManager)
-                .tabItem { Label("Профиль", systemImage: "person.fill") }
+                .tabItem { Label(t("tab_profile", language), systemImage: "person.fill") }
 
             SettingsView()
                 .environmentObject(chatManager)
-                .tabItem { Label("Настройки", systemImage: "gearshape.fill") }
+                .tabItem { Label(t("tab_settings", language), systemImage: "gearshape.fill") }
         }
         .accentColor(Color(red: 108/255, green: 99/255, blue: 255/255))
+        // preferredColorScheme реагирует на @AppStorage("app_theme") автоматически —
+        // отдельных ручных "принудительных обновлений" через deprecated
+        // UIApplication.shared.windows больше не нужно.
         .preferredColorScheme(colorScheme)
         .onAppear {
             if let uid = authManager.currentUser?.uid {
@@ -946,7 +1112,6 @@ struct MainTabView: View {
                 chatManager.detach()
             }
         }
-        // 🥚 ПАСХАЛКА: 5 нажатий на логотип NEMESIS
         .onTapGesture(count: 5) {
             showEasterEgg = true
             easterEggText = "🐱 КОТИК TEAM 🐱\n\nNemesis AI создан с любовью ❤️\nВерсия: 2.1.0\n\n🍪 Спасибо, что ты с нами!"
@@ -959,10 +1124,10 @@ struct MainTabView: View {
     }
 
     var colorScheme: ColorScheme? {
-        switch theme {
-        case AppTheme.dark.rawValue: return .dark
-        case AppTheme.light.rawValue: return .light
-        default: return nil // .system
+        switch AppTheme(rawValue: theme) ?? .system {
+        case .dark: return .dark
+        case .light: return .light
+        case .system: return nil
         }
     }
 }
@@ -973,6 +1138,8 @@ struct ChatHomeView: View {
     @EnvironmentObject var chatManager: ChatManager
     @AppStorage("ai_mode") private var aiMode: String = AIMode.standard.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
+
+    @StateObject private var keyboard = KeyboardResponder()
 
     @State private var inputText = ""
     @State private var showChatList = false
@@ -990,7 +1157,7 @@ struct ChatHomeView: View {
                                     Spacer(minLength: 80)
                                     Text("🤖")
                                         .font(.system(size: 40))
-                                    Text(localizedText("Начните разговор с Nemesis AI"))
+                                    Text(t("chat_empty", language))
                                         .foregroundColor(Color(red: 85/255, green: 85/255, blue: 102/255))
                                     Spacer()
                                 }
@@ -1022,7 +1189,7 @@ struct ChatHomeView: View {
                             .scaledToFill()
                             .frame(width: 44, height: 44)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                        Text(localizedText("Фото прикреплено"))
+                        Text(t("chat_photo_attached", language))
                             .font(.caption)
                             .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
                         Spacer()
@@ -1041,7 +1208,7 @@ struct ChatHomeView: View {
                         Button(action: {
                             aiMode = mode.rawValue
                         }) {
-                            Text(localizedText(mode.rawValue))
+                            Text(mode.displayName(language))
                                 .font(.caption)
                                 .fontWeight(aiMode == mode.rawValue ? .semibold : .regular)
                                 .padding(.horizontal, 12)
@@ -1070,7 +1237,7 @@ struct ChatHomeView: View {
                     }
                     .disabled(chatManager.isUploadingPhoto)
 
-                    TextField(localizedText("Напиши сообщение..."), text: $inputText)
+                    TextField(t("chat_placeholder", language), text: $inputText)
                         .textFieldStyle(CustomTextFieldStyle())
                         .disabled(chatManager.isSending)
 
@@ -1102,6 +1269,9 @@ struct ChatHomeView: View {
                 .padding(.top, 4)
             }
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
+            // Берём управление клавиатурой на себя — фикс "прыжка" при наборе текста.
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .padding(.bottom, keyboard.currentHeight)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -1111,7 +1281,7 @@ struct ChatHomeView: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Text(chatManager.chats.first(where: { $0.id == chatManager.currentChatId })?.title ?? "Nemesis AI")
+                    Text(chatManager.chats.first(where: { $0.id == chatManager.currentChatId })?.title ?? t("chat_default_title", language))
                         .font(.headline)
                         .foregroundColor(.white)
                 }
@@ -1144,35 +1314,19 @@ struct ChatHomeView: View {
             selectedImage = nil
         }
     }
-
-    // MARK: - Локализация
-    func localizedText(_ text: String) -> String {
-        let currentLang = AppLanguage(rawValue: language) ?? .system
-        
-        // Простая локализация для демонстрации
-        if currentLang == .en {
-            let dict: [String: String] = [
-                "Начните разговор с Nemesis AI": "Start a conversation with Nemesis AI",
-                "Напиши сообщение...": "Type a message...",
-                "Фото прикреплено": "Photo attached",
-                "Стандартный": "Standard",
-                "Рассуждение": "Reasoning",
-                "Быстрый": "Fast"
-            ]
-            return dict[text] ?? text
-        }
-        
-        return text
-    }
 }
 
 // MARK: - Chat List Sheet
+// Подтверждение удаления теперь живёт полностью внутри этого экрана (а не
+// пробрасывается наверх биндингами в родителя) — раньше "showingDeleteConfirmation"
+// выставлялся в тот же момент, что и dismiss() шторки, и SwiftUI в такой гонке
+// просто "терял" алерт: тап по корзине не приводил ни к какому видимому эффекту.
 struct ChatListSheet: View {
     @EnvironmentObject var chatManager: ChatManager
     @Environment(\.dismiss) var dismiss
+    @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
 
-    @State private var chatToDelete: String?
-    @State private var showingDeleteConfirmation = false
+    @State private var chatPendingDelete: ChatSession?
 
     var body: some View {
         NavigationView {
@@ -1188,7 +1342,7 @@ struct ChatListSheet: View {
                                     Text(chat.title)
                                         .foregroundColor(.white)
                                         .fontWeight(chat.id == chatManager.currentChatId ? .semibold : .regular)
-                                    Text("\(chat.messages.count) сообщений")
+                                    Text("\(chat.messages.count) \(t("chatlist_messages", language))")
                                         .font(.caption)
                                         .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
                                 }
@@ -1198,16 +1352,18 @@ struct ChatListSheet: View {
                                         .foregroundColor(Color(red: 108/255, green: 99/255, blue: 255/255))
                                 }
                             }
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
 
                         Button(action: {
-                            chatToDelete = chat.id
-                            showingDeleteConfirmation = true
+                            chatPendingDelete = chat
                         }) {
                             Image(systemName: "trash")
                                 .foregroundColor(.red)
                                 .font(.system(size: 16))
+                                .padding(8)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
@@ -1215,19 +1371,18 @@ struct ChatListSheet: View {
                 }
                 .onDelete { indices in
                     if let idx = indices.first {
-                        chatToDelete = chatManager.chats[idx].id
-                        showingDeleteConfirmation = true
+                        chatPendingDelete = chatManager.chats[idx]
                     }
                 }
             }
             .listStyle(.plain)
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
             .hiddenScrollBackground()
-            .navigationTitle("Мои чаты")
+            .navigationTitle(t("chatlist_title", language))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Закрыть") { dismiss() }
+                    Button(t("chatlist_close", language)) { dismiss() }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
@@ -1238,21 +1393,18 @@ struct ChatListSheet: View {
                     }
                 }
             }
-            .alert("Удалить чат?", isPresented: $showingDeleteConfirmation) {
-                Button("Удалить", role: .destructive) {
-                    if let id = chatToDelete {
-                        chatManager.deleteChat(id)
-                        chatToDelete = nil
-                    }
-                }
-                Button("Отмена", role: .cancel) {
-                    chatToDelete = nil
-                }
-            } message: {
-                Text("Все сообщения в этом чате будут удалены без возможности восстановления.")
-            }
         }
         .preferredColorScheme(.dark)
+        .alert(item: $chatPendingDelete) { chat in
+            Alert(
+                title: Text(t("chatlist_delete_title", language)),
+                message: Text(t("chatlist_delete_msg", language)),
+                primaryButton: .destructive(Text(t("delete", language))) {
+                    chatManager.deleteChat(chat.id)
+                },
+                secondaryButton: .cancel(Text(t("cancel", language)))
+            )
+        }
     }
 }
 
@@ -1347,6 +1499,8 @@ struct MessageBubble: View {
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var chatManager: ChatManager
+    @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
+
     @State private var showKeyAlert = false
     @State private var generatedKey = ""
     @State private var keyInput = ""
@@ -1355,149 +1509,150 @@ struct ProfileView: View {
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 24) {
-                if let user = authManager.currentUser {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [user.role.color, user.role.color.opacity(0.6)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+            ScrollView {
+                VStack(spacing: 24) {
+                    if let user = authManager.currentUser {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [user.role.color, user.role.color.opacity(0.6)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .frame(width: 80, height: 80)
-                        .overlay(
-                            Text(String(user.username.prefix(1).uppercased()))
-                                .font(.title)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                        )
+                            .frame(width: 80, height: 80)
+                            .overlay(
+                                Text(String(user.username.prefix(1).uppercased()))
+                                    .font(.title)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            )
 
-                    Text(user.username)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-
-                    Text(user.email)
-                        .font(.subheadline)
-                        .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
-
-                    Text(user.role.displayName)
-                        .font(.headline)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(user.role.color.opacity(0.15))
-                        .foregroundColor(user.role.color)
-                        .cornerRadius(20)
-
-                    HStack(spacing: 30) {
-                        VStack {
-                            Text("\(user.role.maxTokens)")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                            Text("Токенов")
-                                .font(.caption)
-                                .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
-                        }
-
-                        VStack {
-                            Text("\(chatManager.chats.count)")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                            Text("Чатов")
-                                .font(.caption)
-                                .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
-                        }
-                    }
-                    .padding()
-                    .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
-                    .cornerRadius(16)
-
-                    // Активация ключа в профиле
-                    VStack(spacing: 12) {
-                        Text("🎁 Активировать ключ")
-                            .font(.headline)
+                        Text(user.username)
+                            .font(.title2)
+                            .fontWeight(.bold)
                             .foregroundColor(.white)
 
-                        HStack {
-                            TextField("Введите ключ...", text: $keyInput)
-                                .textFieldStyle(CustomTextFieldStyle())
-                                .autocapitalization(.allCharacters)
-                            Button(isActivating ? "⏳" : "Активировать") {
-                                activateKey()
-                            }
+                        Text(user.email)
+                            .font(.subheadline)
+                            .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
+
+                        Text(user.role.displayName)
+                            .font(.headline)
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .background(Color(red: 108/255, green: 99/255, blue: 255/255))
-                            .cornerRadius(12)
-                            .foregroundColor(.white)
-                            .font(.headline)
-                            .disabled(isActivating || keyInput.isEmpty)
+                            .padding(.vertical, 6)
+                            .background(user.role.color.opacity(0.15))
+                            .foregroundColor(user.role.color)
+                            .cornerRadius(20)
+
+                        HStack(spacing: 30) {
+                            VStack {
+                                Text("\(user.role.maxTokens)")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                Text(t("profile_tokens", language))
+                                    .font(.caption)
+                                    .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
+                            }
+
+                            VStack {
+                                Text("\(chatManager.chats.count)")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                Text(t("profile_chats", language))
+                                    .font(.caption)
+                                    .foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))
+                            }
                         }
+                        .padding()
+                        .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
+                        .cornerRadius(16)
+
+                        // Активация ключа в профиле
+                        VStack(spacing: 12) {
+                            Text(t("profile_activate_title", language))
+                                .font(.headline)
+                                .foregroundColor(.white)
+
+                            HStack {
+                                TextField(t("profile_activate_ph", language), text: $keyInput)
+                                    .textFieldStyle(CustomTextFieldStyle())
+                                    .autocapitalization(.allCharacters)
+                                Button(isActivating ? "⏳" : t("profile_activate_btn", language)) {
+                                    activateKey()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(Color(red: 108/255, green: 99/255, blue: 255/255))
+                                .cornerRadius(12)
+                                .foregroundColor(.white)
+                                .font(.headline)
+                                .disabled(isActivating || keyInput.isEmpty)
+                            }
+                            .padding(.horizontal)
+
+                            if !keyStatus.isEmpty {
+                                Text(keyStatus)
+                                    .font(.caption)
+                                    .foregroundColor(keyStatus.contains("✅") ? .green : .red)
+                            }
+                        }
+                        .padding()
+                        .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
+                        .cornerRadius(20)
                         .padding(.horizontal)
 
-                        if !keyStatus.isEmpty {
-                            Text(keyStatus)
-                                .font(.caption)
-                                .foregroundColor(keyStatus.contains("✅") ? .green : .red)
+                        if user.role.canGenerateKeys {
+                            Button(action: generateKey) {
+                                HStack {
+                                    Image(systemName: "key.fill")
+                                    Text(t("profile_generate_key", language))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.yellow.opacity(0.1))
+                                .foregroundColor(.yellow)
+                                .cornerRadius(12)
+                            }
+                            .padding(.horizontal)
                         }
-                    }
-                    .padding()
-                    .background(Color(red: 255/255, green: 255/255, blue: 255/255).opacity(0.025))
-                    .cornerRadius(20)
-                    .padding(.horizontal)
 
-                    if user.role.canGenerateKeys {
-                        Button(action: generateKey) {
+                        Button(action: {
+                            authManager.signOut()
+                        }) {
                             HStack {
-                                Image(systemName: "key.fill")
-                                Text("Сгенерировать ключ")
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                Text(t("profile_logout", language))
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.yellow.opacity(0.1))
-                            .foregroundColor(.yellow)
+                            .background(Color(red: 255/255, green: 68/255, blue: 68/255).opacity(0.1))
+                            .foregroundColor(Color(red: 255/255, green: 68/255, blue: 68/255))
                             .cornerRadius(12)
                         }
                         .padding(.horizontal)
                     }
-
-                    Button(action: {
-                        authManager.signOut()
-                    }) {
-                        HStack {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                            Text("Выйти")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color(red: 255/255, green: 68/255, blue: 68/255).opacity(0.1))
-                        .foregroundColor(Color(red: 255/255, green: 68/255, blue: 68/255))
-                        .cornerRadius(12)
-                    }
-                    .padding(.horizontal)
                 }
-
-                Spacer()
+                .padding(.top, 40)
+                .padding(.bottom, 30)
             }
-            .padding(.top, 40)
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Профиль")
+                    Text(t("profile_title", language))
                         .font(.headline)
                         .foregroundColor(.white)
                 }
             }
         }
-        .alert("👑 Новый ключ", isPresented: $showKeyAlert) {
-            Button("Скопировать") {
+        .alert(t("profile_new_key_title", language), isPresented: $showKeyAlert) {
+            Button(t("profile_copy", language)) {
                 UIPasteboard.general.string = generatedKey
             }
-            Button("Закрыть", role: .cancel) { }
+            Button(t("chatlist_close", language), role: .cancel) { }
         } message: {
             Text(generatedKey)
         }
@@ -1505,17 +1660,17 @@ struct ProfileView: View {
 
     func activateKey() {
         guard !keyInput.isEmpty else {
-            keyStatus = "❌ Введите ключ"
+            keyStatus = t("profile_activate_empty", language)
             return
         }
         isActivating = true
         authManager.activateKey(key: keyInput.uppercased()) { success in
             isActivating = false
             if success {
-                keyStatus = "✅ Роль обновлена!"
+                keyStatus = "✅"
                 keyInput = ""
             } else {
-                keyStatus = authManager.errorMessage ?? "❌ Ошибка активации"
+                keyStatus = authManager.errorMessage ?? "❌"
             }
         }
     }
@@ -1535,8 +1690,7 @@ struct SettingsView: View {
     @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
     @AppStorage("nemesis_font_size") private var fontSize: Double = 16
-    
-    // Для пасхалки с нажатиями на версию
+
     @State private var versionTapCount = 0
     @State private var showEasterEgg = false
     @State private var easterEggText = ""
@@ -1544,45 +1698,27 @@ struct SettingsView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Тема").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
-                    Picker("Тема", selection: $theme) {
-                        ForEach(AppTheme.allCases, id: \.self) { theme in
-                            Text(theme.rawValue).tag(theme.rawValue)
+                Section(header: Text(t("settings_theme", language)).foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
+                    Picker(t("settings_theme", language), selection: $theme) {
+                        ForEach(AppTheme.allCases, id: \.self) { themeOption in
+                            Text(themeOption.displayName(language)).tag(themeOption.rawValue)
                         }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: theme) { _ in
-                        // Принудительно обновляем интерфейс
-                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                            windowScene.windows.forEach { window in
-                                window.rootViewController?.setNeedsStatusBarAppearanceUpdate()
-                            }
-                        }
-                        // Уведомляем систему о смене темы
-                        UIApplication.shared.windows.first?.rootViewController?.view.setNeedsDisplay()
-                    }
                 }
 
-                Section(header: Text("Язык").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
-                    Picker("Язык", selection: $language) {
-                        ForEach(AppLanguage.allCases, id: \.self) { lang in
-                            Text(lang.rawValue).tag(lang.rawValue)
+                Section(header: Text(t("settings_language", language)).foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
+                    Picker(t("settings_language", language), selection: $language) {
+                        ForEach(AppLanguage.allCases, id: \.self) { langOption in
+                            Text(langOption.displayName(language)).tag(langOption.rawValue)
                         }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: language) { _ in
-                        // Перезагружаем интерфейс для применения языка
-                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                            windowScene.windows.forEach { window in
-                                window.rootViewController?.setNeedsStatusBarAppearanceUpdate()
-                            }
-                        }
-                    }
                 }
 
-                Section(header: Text("Внешний вид").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
+                Section(header: Text(t("settings_appearance", language)).foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
                     HStack {
-                        Text("Размер текста")
+                        Text(t("settings_font_size", language))
                         Spacer()
                         Stepper(value: $fontSize, in: 12...24, step: 2) {
                             Text("\(Int(fontSize))")
@@ -1590,11 +1726,10 @@ struct SettingsView: View {
                     }
                 }
 
-                Section(header: Text("О приложении").foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
-                    HStack { 
-                        Text("Версия")
+                Section(header: Text(t("settings_about", language)).foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
+                    HStack {
+                        Text(t("settings_version", language))
                         Spacer()
-                        // 🥚 Пасхалка: двойное нажатие на версию
                         Text("2.1.0")
                             .foregroundColor(.gray)
                             .onTapGesture(count: 5) {
@@ -1606,8 +1741,8 @@ struct SettingsView: View {
                                 }
                             }
                     }
-                    HStack { Text("Команда"); Spacer(); Text("Kotik Team").foregroundColor(.gray) }
-                    HStack { Text("Поддержка"); Spacer(); Text("@Nemesissup").foregroundColor(.gray) }
+                    HStack { Text(t("settings_team", language)); Spacer(); Text("Kotik Team").foregroundColor(.gray) }
+                    HStack { Text(t("settings_support", language)); Spacer(); Text("@Nemesissup").foregroundColor(.gray) }
                 }
             }
             .hiddenScrollBackground()
@@ -1615,7 +1750,7 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Настройки")
+                    Text(t("settings_title", language))
                         .font(.headline)
                         .foregroundColor(.white)
                 }
