@@ -38,6 +38,18 @@ workflows:
             <true/>
             <key>MinimumOSVersion</key>
             <string>15.0</string>
+
+            <!-- Без этого ключа iOS запускает приложение в режиме совместимости
+                 под старый маленький экран — именно баг с "чёрными полосами". -->
+            <key>UILaunchScreen</key>
+            <dict/>
+
+            <!-- Без этого ключа приложение крашится в момент, когда пользователь
+                 нажимает кнопку прикрепления фото (доступ к галерее требует
+                 явного описания причины). -->
+            <key>NSPhotoLibraryUsageDescription</key>
+            <string>Nemesis AI использует доступ к галерее, чтобы вы могли прикрепить фото к сообщению в чате.</string>
+
             <key>UIRequiredDeviceCapabilities</key>
             <array>
               <string>armv7</string>
@@ -51,24 +63,34 @@ workflows:
           </dict>
           </plist>
           EOF
-
       - name: Install xcodegen
         script: |
           brew install xcodegen
-
       - name: Generate Xcode project
         script: |
           xcodegen generate
-
       - name: Install Pods
         script: |
           pod install
-
+      - name: Show Info.plist build settings (diagnostic)
+        script: |
+          set -e
+          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+          if [ -n "$WORKSPACE" ]; then
+            xcodebuild -workspace "$WORKSPACE" -scheme NemesisAI -configuration Release -showBuildSettings 2>/dev/null | grep -i "INFOPLIST\|GENERATE_INFOPLIST" || true
+          else
+            xcodebuild -project NemesisAI.xcodeproj -scheme NemesisAI -configuration Release -showBuildSettings 2>/dev/null | grep -i "INFOPLIST\|GENERATE_INFOPLIST" || true
+          fi
       - name: Build IPA
         script: |
           set -e
-          
-          # Проверяем наличие workspace
+
+          # Флаг ниже — вторая страховка поверх физического Info.plist: если
+          # xcodegen/проект генерирует Info.plist автоматически (GENERATE_INFOPLIST_FILE=YES)
+          # и игнорирует наш физический файл, этот флаг командной строки всё равно
+          # заставит Xcode сгенерировать корректный Launch Screen.
+          LAUNCH_SCREEN_FIX="INFOPLIST_KEY_UILaunchScreen_Generation=YES"
+
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
           if [ -z "$WORKSPACE" ]; then
             echo "❌ Workspace not found! Using project instead..."
@@ -79,6 +101,7 @@ workflows:
               -sdk iphoneos \
               -arch arm64 \
               CODE_SIGNING_ALLOWED=NO \
+              $LAUNCH_SCREEN_FIX \
               -derivedDataPath build
           else
             echo "📦 Using workspace: $WORKSPACE"
@@ -89,29 +112,29 @@ workflows:
               -sdk iphoneos \
               -arch arm64 \
               CODE_SIGNING_ALLOWED=NO \
+              $LAUNCH_SCREEN_FIX \
               -derivedDataPath build
           fi
-
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -1)
-          
+
           if [ -z "$APP_PATH" ]; then
             echo "❌ App not found!"
             echo "🔍 Searching in build folder..."
             find build -name "*.app" 2>/dev/null || echo "No .app found"
             exit 1
           fi
-
           echo "✅ App found: $APP_PATH"
           echo "📁 App contents:"
           ls -la "$APP_PATH"
-
+          echo "📄 Effective Info.plist inside built app:"
+          plutil -p "$APP_PATH/Info.plist" | grep -i "LaunchScreen\|PhotoLibrary" || echo "⚠️ UILaunchScreen/NSPhotoLibraryUsageDescription NOT found in built Info.plist!"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r NemesisAI.ipa Payload/
-          
+
           mkdir -p build/ios
           mv NemesisAI.ipa build/ios/
-          
+
           echo "✅ Build complete!"
     artifacts:
       - build/ios/NemesisAI.ipa
