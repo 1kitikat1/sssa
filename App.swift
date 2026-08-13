@@ -476,11 +476,9 @@ class AIService {
         switch mode {
         case .standard:
             temperature = 0.5
-
         case .reasoning:
             temperature = 0.3
             systemPrompt = SYSTEM_PROMPT + "\n\nВажно: Сначала дай краткое пошаговое объяснение своего рассуждения (1-2 предложения), затем — полный ответ."
-
         case .fast:
             temperature = 0.8
             maxTokens = min(maxTokens, 500)
@@ -502,23 +500,17 @@ class AIService {
         }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 60 // ✅ Добавлен таймаут 60 секунд
+        request.timeoutInterval = 60
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(AGNES_API_KEY)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        
-        // ✅ Проверяем статус ответа
+
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
-            var errorText = "HTTP \(http.statusCode)"
-            do {
-                let errorData = try await String(bytes: bytes, encoding: .utf8) ?? ""
-                errorText = "HTTP \(http.statusCode): \(errorData.prefix(200))"
-            } catch {}
             throw NSError(domain: "AIService", code: http.statusCode, userInfo: [
-                NSLocalizedDescriptionKey: errorText
+                NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"
             ])
         }
 
