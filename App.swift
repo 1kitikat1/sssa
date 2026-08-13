@@ -342,21 +342,6 @@ struct ChatSession: Identifiable, Equatable {
 }
 
 // MARK: - App Settings
-// ВАЖНО: rawValue теперь стабильные английские идентификаторы (а не русский текст,
-// как было раньше) — иначе полноценная локализация невозможна: то, что хранится
-// в @AppStorage, не должно зависеть от того, какой язык сейчас выбран для отображения.
-enum AppTheme: String, CaseIterable {
-    case dark, light, system
-
-    func displayName(_ lang: String) -> String {
-        switch self {
-        case .dark: return t("theme_dark", lang)
-        case .light: return t("theme_light", lang)
-        case .system: return t("theme_system", lang)
-        }
-    }
-}
-
 enum AIMode: String, CaseIterable {
     case standard, reasoning, fast
 
@@ -382,8 +367,6 @@ enum AppLanguage: String, CaseIterable {
 }
 
 // MARK: - Localization
-// Простой, но полноценный словарь переводов + функция t(key, lang).
-// "system" резолвится в ru/en по языку устройства.
 func resolvedLanguageCode(_ raw: String) -> String {
     switch AppLanguage(rawValue: raw) ?? .system {
     case .ru: return "ru"
@@ -420,11 +403,6 @@ let translations: [String: [String: String]] = [
     "mode_reasoning": ["ru": "Рассуждение", "en": "Reasoning"],
     "mode_fast": ["ru": "Быстрый", "en": "Fast"],
 
-    "theme_dark": ["ru": "Тёмная", "en": "Dark"],
-    "theme_light": ["ru": "Светлая", "en": "Light"],
-    "theme_system": ["ru": "Системная", "en": "System"],
-    "lang_system": ["ru": "Системный", "en": "System"],
-
     "chatlist_title": ["ru": "Мои чаты", "en": "My chats"],
     "chatlist_close": ["ru": "Закрыть", "en": "Close"],
     "chatlist_messages": ["ru": "сообщений", "en": "messages"],
@@ -446,7 +424,6 @@ let translations: [String: [String: String]] = [
     "profile_copy": ["ru": "Скопировать", "en": "Copy"],
 
     "settings_title": ["ru": "Настройки", "en": "Settings"],
-    "settings_theme": ["ru": "Тема", "en": "Theme"],
     "settings_language": ["ru": "Язык", "en": "Language"],
     "settings_appearance": ["ru": "Внешний вид", "en": "Appearance"],
     "settings_font_size": ["ru": "Размер текста", "en": "Text size"],
@@ -454,6 +431,7 @@ let translations: [String: [String: String]] = [
     "settings_version": ["ru": "Версия", "en": "Version"],
     "settings_team": ["ru": "Команда", "en": "Team"],
     "settings_support": ["ru": "Поддержка", "en": "Support"],
+    "lang_system": ["ru": "Системный", "en": "System"]
 ]
 
 func t(_ key: String, _ langRaw: String) -> String {
@@ -491,7 +469,6 @@ class AIService {
             formattedMessages[formattedMessages.count - 1]["content"] = content
         }
 
-        // === РЕЖИМЫ ИИ — реально разное поведение, не только температура ===
         var temperature: Double
         var maxTokens = role.maxTokens
         var systemPrompt = SYSTEM_PROMPT
@@ -862,11 +839,6 @@ extension View {
 }
 
 // MARK: - Keyboard Responder
-// Раньше при наборе текста экран "прыгал" вверх — SwiftUI's автоматический
-// keyboard-avoidance конфликтовал с нашим ScrollViewReader (который сам
-// скроллит список сообщений). Берём управление полностью на себя: игнорируем
-// системный сдвиг (.ignoresSafeArea(.keyboard)) и вручную поднимаем контент
-// ровно на высоту клавиатуры одним плавным движением — без двойного скачка.
 final class KeyboardResponder: ObservableObject {
     @Published var currentHeight: CGFloat = 0
     private var showObserver: NSObjectProtocol?
@@ -989,7 +961,6 @@ struct AuthView: View {
                     SecureField(t("auth_password_ph", language), text: $password)
                         .textFieldStyle(CustomTextFieldStyle())
 
-                    // ===== ОСНОВНАЯ КНОПКА =====
                     Button(action: handleAuth) {
                         Group {
                             if authManager.isLoading {
@@ -1017,10 +988,6 @@ struct AuthView: View {
                     .cornerRadius(12)
                     .disabled(authManager.isLoading)
 
-                    // ===== ВТОРАЯ КНОПКА (раньше реагировала только на сами
-                    // буквы текста — теперь полноценная кнопка на всю ширину
-                    // с contentShape(Rectangle()), которая делает кликабельной
-                    // ВСЮ прямоугольную область, а не только glyph-ы шрифта) =====
                     Button(action: { withAnimation { isRegister.toggle() } }) {
                         Text(isRegister ? t("auth_to_login", language) : t("auth_to_register", language))
                             .font(.subheadline)
@@ -1075,7 +1042,6 @@ struct AuthView: View {
 struct MainTabView: View {
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var chatManager = ChatManager()
-    @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
 
     @State private var showEasterEgg = false
@@ -1096,10 +1062,7 @@ struct MainTabView: View {
                 .tabItem { Label(t("tab_settings", language), systemImage: "gearshape.fill") }
         }
         .accentColor(Color(red: 108/255, green: 99/255, blue: 255/255))
-        // preferredColorScheme реагирует на @AppStorage("app_theme") автоматически —
-        // отдельных ручных "принудительных обновлений" через deprecated
-        // UIApplication.shared.windows больше не нужно.
-        .preferredColorScheme(colorScheme)
+        .preferredColorScheme(.dark)
         .onAppear {
             if let uid = authManager.currentUser?.uid {
                 chatManager.attach(uid: uid)
@@ -1120,14 +1083,6 @@ struct MainTabView: View {
             Button("Круто! 🎉") { }
         } message: {
             Text(easterEggText)
-        }
-    }
-
-    var colorScheme: ColorScheme? {
-        switch AppTheme(rawValue: theme) ?? .system {
-        case .dark: return .dark
-        case .light: return .light
-        case .system: return nil
         }
     }
 }
@@ -1269,7 +1224,6 @@ struct ChatHomeView: View {
                 .padding(.top, 4)
             }
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
-            // Берём управление клавиатурой на себя — фикс "прыжка" при наборе текста.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .padding(.bottom, keyboard.currentHeight)
             .navigationBarTitleDisplayMode(.inline)
@@ -1317,16 +1271,13 @@ struct ChatHomeView: View {
 }
 
 // MARK: - Chat List Sheet
-// Подтверждение удаления теперь живёт полностью внутри этого экрана (а не
-// пробрасывается наверх биндингами в родителя) — раньше "showingDeleteConfirmation"
-// выставлялся в тот же момент, что и dismiss() шторки, и SwiftUI в такой гонке
-// просто "терял" алерт: тап по корзине не приводил ни к какому видимому эффекту.
 struct ChatListSheet: View {
     @EnvironmentObject var chatManager: ChatManager
     @Environment(\.dismiss) var dismiss
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
 
     @State private var chatPendingDelete: ChatSession?
+    @State private var showingDeleteAlert = false
 
     var body: some View {
         NavigationView {
@@ -1358,6 +1309,7 @@ struct ChatListSheet: View {
 
                         Button(action: {
                             chatPendingDelete = chat
+                            showingDeleteAlert = true
                         }) {
                             Image(systemName: "trash")
                                 .foregroundColor(.red)
@@ -1372,6 +1324,7 @@ struct ChatListSheet: View {
                 .onDelete { indices in
                     if let idx = indices.first {
                         chatPendingDelete = chatManager.chats[idx]
+                        showingDeleteAlert = true
                     }
                 }
             }
@@ -1395,15 +1348,18 @@ struct ChatListSheet: View {
             }
         }
         .preferredColorScheme(.dark)
-        .alert(item: $chatPendingDelete) { chat in
-            Alert(
-                title: Text(t("chatlist_delete_title", language)),
-                message: Text(t("chatlist_delete_msg", language)),
-                primaryButton: .destructive(Text(t("delete", language))) {
+        .alert(t("chatlist_delete_title", language), isPresented: $showingDeleteAlert) {
+            Button(t("delete", language), role: .destructive) {
+                if let chat = chatPendingDelete {
                     chatManager.deleteChat(chat.id)
-                },
-                secondaryButton: .cancel(Text(t("cancel", language)))
-            )
+                    chatPendingDelete = nil
+                }
+            }
+            Button(t("cancel", language), role: .cancel) {
+                chatPendingDelete = nil
+            }
+        } message: {
+            Text(t("chatlist_delete_msg", language))
         }
     }
 }
@@ -1687,7 +1643,6 @@ struct SettingsView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var chatManager: ChatManager
 
-    @AppStorage("app_theme") private var theme: String = AppTheme.system.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
     @AppStorage("nemesis_font_size") private var fontSize: Double = 16
 
@@ -1698,15 +1653,6 @@ struct SettingsView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text(t("settings_theme", language)).foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
-                    Picker(t("settings_theme", language), selection: $theme) {
-                        ForEach(AppTheme.allCases, id: \.self) { themeOption in
-                            Text(themeOption.displayName(language)).tag(themeOption.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
                 Section(header: Text(t("settings_language", language)).foregroundColor(Color(red: 136/255, green: 136/255, blue: 170/255))) {
                     Picker(t("settings_language", language), selection: $language) {
                         ForEach(AppLanguage.allCases, id: \.self) { langOption in
