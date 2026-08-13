@@ -853,43 +853,6 @@ extension View {
     }
 }
 
-// MARK: - Keyboard Responder
-final class KeyboardResponder: ObservableObject {
-    @Published var currentHeight: CGFloat = 0
-    private var showObserver: NSObjectProtocol?
-    private var hideObserver: NSObjectProtocol?
-
-    init() {
-        showObserver = NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillShowNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    self.currentHeight = frame.height
-                }
-            }
-        }
-        hideObserver = NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillHideNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self = self else { return }
-            withAnimation(.easeOut(duration: 0.25)) {
-                self.currentHeight = 0
-            }
-        }
-    }
-
-    deinit {
-        if let showObserver = showObserver { NotificationCenter.default.removeObserver(showObserver) }
-        if let hideObserver = hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
-    }
-}
-
 // MARK: - Stars View
 struct StarsView: View {
     let starCount = 120
@@ -1109,8 +1072,6 @@ struct ChatHomeView: View {
     @AppStorage("ai_mode") private var aiMode: String = AIMode.standard.rawValue
     @AppStorage("app_language") private var language: String = AppLanguage.system.rawValue
 
-    @StateObject private var keyboard = KeyboardResponder()
-
     @State private var inputText = ""
     @State private var showChatList = false
     @State private var showImagePicker = false
@@ -1239,8 +1200,6 @@ struct ChatHomeView: View {
                 .padding(.top, 4)
             }
             .background(Color(red: 7/255, green: 7/255, blue: 13/255))
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            .padding(.bottom, keyboard.currentHeight)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
